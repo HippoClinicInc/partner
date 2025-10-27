@@ -1,5 +1,5 @@
-#ifndef HIPPO_CLIENT_H
-#define HIPPO_CLIENT_H
+#ifndef HIPPO_CLIENT_MANAGER_H
+#define HIPPO_CLIENT_MANAGER_H
 
 #include <string>
 #include <nlohmann/json.hpp>
@@ -44,4 +44,4 @@ private:
   static std::string hospital_id_;
 };
 
-#endif // HIPPO_CLIENT_H
+#endif // HIPPO_CLIENT_MANAGER_H
