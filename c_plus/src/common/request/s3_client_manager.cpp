@@ -50,7 +50,11 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientManager::refresh_client(const std::st
     json cred_json = token_fetcher_(patient_id);
     S3Credential cred = S3Credential::from_json(cred_json);
 
-    Aws::Auth::AWSCredentials awsCred(cred.accessKeyId, cred.secretAccessKey, cred.sessionToken);
+    Aws::Auth::AWSCredentials awsCred(
+    Aws::String(cred.accessKeyId.c_str()),
+    Aws::String(cred.secretAccessKey.c_str()),
+    Aws::String(cred.sessionToken.c_str())
+);
     Aws::Client::ClientConfiguration config;
     config.region = region_;
     config.maxConnections = static_cast<int>(max_pool_connections_);
