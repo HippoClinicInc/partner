@@ -1,4 +1,4 @@
-#include "hippo_client.h"
+#include "hippo_client_manager.h"
 #include <iostream>
 #include <string>
 #include <curl/curl.h>
