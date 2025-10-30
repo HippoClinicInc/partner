@@ -54,6 +54,15 @@ inline unsigned __int64 _byteswap_uint64(unsigned __int64 x) {
 #include <aws/core/utils/memory/stl/AWSString.h>
 #include <aws/core/utils/stream/PreallocatedStreamBuf.h>
 
+// HTTP client headers for backend API calls
+#include <aws/core/http/HttpClient.h>
+#include <aws/core/http/HttpRequest.h>
+#include <aws/core/http/HttpResponse.h>
+#include <aws/core/http/HttpClientFactory.h>
+
+// HippoClient for backend API calls
+#include "request/hippo_client.h"
+
 // DLL export macro definition
 #ifdef S3UPLOAD_EXPORTS
 #define S3UPLOAD_API __declspec(dllexport)
@@ -105,7 +114,11 @@ enum UploadStatus {
     // SDK resources were successfully initialized
     SDK_INIT_SUCCESS = 5,
     // SDK resources were successfully cleaned up
-    SDK_CLEAN_SUCCESS = 6
+    SDK_CLEAN_SUCCESS = 6,
+    // Upload confirmation with backend API completed successfully
+    CONFIRM_SUCCESS = 7,
+    // Upload successful but confirmation failed
+    CONFIRM_FAILED = 8
 };
 
 // Async upload progress information structure
@@ -119,7 +132,7 @@ struct AsyncUploadProgress {
     long long totalSize;
     // Error message if upload failed
     String errorMessage;
-    // Local file path
+    // s3 file path
     String s3ObjectKey;
     // Local file path
     String localFilePath;
@@ -129,9 +142,15 @@ struct AsyncUploadProgress {
     std::chrono::steady_clock::time_point endTime;
      // Atomic flag for cancellation requests
     std::atomic<bool> shouldCancel;
+    
+    // Backend confirmation fields
+    String dataId;
+    String uploadDataName;
+    String patientId;
+    bool confirmationAttempted;
 
     // Constructor - initialize with default values
-    AsyncUploadProgress() : status(UPLOAD_PENDING), totalSize(0), shouldCancel(false) {}
+    AsyncUploadProgress() : status(UPLOAD_PENDING), totalSize(0), shouldCancel(false), confirmationAttempted(false) {}
 };
 
 // Async upload manager class - thread-safe singleton for managing multiple uploads
@@ -156,16 +175,7 @@ public:
 
     // Add a new upload to tracking system
     // Returns the upload ID for reference
-    String addUpload(const String& uploadId, const String& localFilePath, const String& s3ObjectKey) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto progress = std::make_shared<AsyncUploadProgress>();
-        progress->uploadId = uploadId;
-        progress->localFilePath = localFilePath;
-        progress->s3ObjectKey = s3ObjectKey;
-        progress->status = UPLOAD_PENDING;  // Set to pending initially
-        uploads_[uploadId] = progress;
-        return uploadId;
-    }
+    String addUpload(const String& uploadId, const String& localFilePath, const String& s3ObjectKey, const String& patientId);
 
     // Get upload progress information by ID
     // Returns shared_ptr to progress info or nullptr if not found
@@ -246,20 +256,38 @@ public:
 extern bool g_isInitialized;
 extern Aws::SDKOptions g_options;
 
+// HippoClient credentials
+extern String g_apiUrl;
+extern String g_email;
+extern String g_password;
+
 // Common utility functions
 String create_response(int code, const String& message);
 
 // Upload ID helper functions
 String getUploadId(const String& dataId, long long timestamp);
 
+// Extract uploadDataName from S3 objectKey
+// objectKey format: "patient/patientId/source_data/dataId/uploadDataName/" or 
+//                   "patient/patientId/source_data/dataId/uploadDataName/filename"
+// Returns the uploadDataName extracted from the path
+String extractUploadDataName(const String& objectKey);
+
 // AWS SDK management functions (extern "C" declarations)
 extern "C" {
     S3UPLOAD_API int __stdcall FileExists(const char* filePath);
     S3UPLOAD_API long __stdcall GetS3FileSize(const char* filePath);
-    S3UPLOAD_API const char* __stdcall InitializeAwsSDK();
-    S3UPLOAD_API const char* __stdcall CleanupAwsSDK();
-    S3UPLOAD_API const char* __stdcall CleanupUploadsByDataId(const char* dataId);
+    S3UPLOAD_API const char* __stdcall SetCredential(const char* userName, const char* password);
 }
+
+// Internal function declarations
+const char* InitializeAwsSDK();
+void CleanupUploadsByDataId(const String& dataId);
+
+// Backend API confirmation function
+bool ConfirmUploadRawFile(const String& dataId, 
+                         const String& uploadDataName, const String& patientId, 
+                         long long uploadFileSizeBytes, const String& s3ObjectKey);
 
 // S3 client creation helper
 Aws::S3::S3Client createS3Client(const String& accessKey,

@@ -1,5 +1,6 @@
 #include "s3_client_manager.h"
 #include <aws/core/auth/AWSCredentials.h>
+#include <aws/core/auth/AWSCredentialsProvider.h>
 #include <aws/core/client/ClientConfiguration.h>
 #include <iostream>
 #include <algorithm>
@@ -50,12 +51,15 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientManager::refresh_client(const std::st
     json cred_json = token_fetcher_(patient_id);
     S3Credential cred = S3Credential::from_json(cred_json);
 
-    Aws::Auth::AWSCredentials awsCred(cred.accessKeyId, cred.secretAccessKey, cred.sessionToken);
+    auto credentialsProvider = Aws::MakeShared<Aws::Auth::SimpleAWSCredentialsProvider>("S3ClientManager",
+        cred.accessKeyId, cred.secretAccessKey, cred.sessionToken);
+    
     Aws::Client::ClientConfiguration config;
     config.region = region_;
     config.maxConnections = static_cast<int>(max_pool_connections_);
 
-    auto client = std::make_shared<Aws::S3::S3Client>(awsCred, config);
+    auto client = std::make_shared<Aws::S3::S3Client>(credentialsProvider, config, 
+        Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, true);
 
     cleanup_cache();
 

@@ -4,10 +4,10 @@ Option Explicit
 ' HippoBackend.bas - HippoClinic backend API functions
 ' This module contains functions that interact with the HippoClinic backend API
 
-Private Const ENV_URL As String = "https://hippoclinic.com"
+Private Const ENV_URL As String = "https://dev.hippoclinic.com"
 ' You need to change to your account when testing this.
-Private Const LOGIN_ACCOUNT As String = "2546566177@qq.com"
-Private Const LOGIN_ACCOUNT_PASSWORD As String = "u3LJ2lXv"
+Public Const LOGIN_ACCOUNT As String = "2546566177@qq.com"
+Public Const LOGIN_ACCOUNT_PASSWORD As String = "u3LJ2lXv"
 
 ' Module-level constant for default Medical Record Number (MRN)
 ' This hardcoded value is used for demonstration purposes only
@@ -248,68 +248,5 @@ ErrorHandler:
     Set http = Nothing
 End Function
 
-' Now using custom AWS S3 implementation from AwsS3Client.bas module
-' The UploadToS3 function is defined in the AwsS3Client module
-
-' Confirm file upload with HippoClinic API after successful S3 upload
-Public Function ConfirmUploadRawFile(ByVal jwtToken As String, ByVal dataId As String, ByVal uploadDataName As String, ByVal patientId As String, ByVal uploadFileSizeBytes As Long, ByVal s3FileKey As String) As Boolean
-    Dim http As Object
-    Dim url As String
-    Dim requestBody As String
-    Dim response As String
-    
-    ' 1. Initialize HTTP client
-    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
-    
-    ' 2. Build API endpoint URL
-    url = ENV_URL & "/hippo/thirdParty/file/confirmUploadRawFile"
-    
-    ' 3. Build JSON request body for upload confirmation
-    requestBody = "{""dataId"":""" & dataId & """,""dataName"":""" & uploadDataName & """,""fileName"":""" & s3FileKey & """,""dataSize"":" & uploadFileSizeBytes & ",""patientId"":""" & patientId & """,""dataType"":20,""uploadDataName"":""" & uploadDataName & """,""isRawDataInternal"":1,""dataVersions"":[0]}"
-    
-    On Error GoTo ErrorHandler
-    
-    ' 4. Send HTTP POST request with authentication
-    http.Open "POST", url, False
-    http.SetRequestHeader "Authorization", "Bearer " & jwtToken
-    http.SetRequestHeader "Content-Type", "application/json"
-    http.Send requestBody
-    
-    ' 5. Process response
-    response = http.ResponseText
-    
-    ' 6. Parse response JSON and validate upload status
-    Dim jsonResponse As Object
-    Set jsonResponse = JsonConverter.ParseJson(response)
-    
-    ' 7. Check HTTP status and response validity
-    If http.Status <> 200 Or jsonResponse Is Nothing Then
-        ConfirmUploadRawFile = False
-        Set http = Nothing
-        Exit Function
-    End If
-    
-    ' 8. Check for failed uploads
-    If Not IsEmpty(jsonResponse("data")("failedUploads")) Then
-        If IsArray(jsonResponse("data")("failedUploads")) Or TypeName(jsonResponse("data")("failedUploads")) = "Collection" Then
-            If jsonResponse("data")("failedUploads").Count > 0 Then
-                Debug.Print "ERROR: Failed to create record for some files."
-                ConfirmUploadRawFile = False
-                Set http = Nothing
-                Exit Function
-            End If
-        End If
-    End If
-    
-    ' 9. All checks passed - upload successful
-    ConfirmUploadRawFile = True
-    
-    Set http = Nothing
-    Exit Function
-    
-ErrorHandler:
-    ' 7. Handle errors
-    Debug.Print "ERROR: Upload confirmation failed - " & Err.Description
-    ConfirmUploadRawFile = False
-    Set http = Nothing
-End Function
+' Upload confirmation is now handled automatically by the C++ backend
+' No manual confirmation needed in VB6 code

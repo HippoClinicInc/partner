@@ -1,4 +1,5 @@
 #include "../common/S3Common.h"
+#include "../common/request/s3_client_manager.h"
 
 // Global queue processing control - ensures only one upload runs at a time
 static std::mutex g_uploadMutex;
@@ -10,14 +11,12 @@ static const int MAX_CONCURRENT_UPLOADS = 1;  // Only allow one upload at a time
 // Async upload worker thread function
 // This function runs in a separate thread to handle file upload to S3
 void asyncUploadWorker(const String& uploadId,
-                      const String& accessKey,
-                      const String& secretKey,
-                      const String& sessionToken,
                       const String& region,
                       const String& bucketName,
                       const String& objectKey,
                       const String& localFilePath,
-                      const String& dataId) {
+                      const String& dataId,
+                      const String& patientId) {
 
     // Step 1: Get upload progress tracker from manager
     auto& manager = AsyncUploadManager::getInstance();
@@ -52,8 +51,8 @@ void asyncUploadWorker(const String& uploadId,
         }
 
         // Step 4: Validate input parameters
-        if (accessKey.empty() || secretKey.empty() || region.empty() ||
-            bucketName.empty() || objectKey.empty() || localFilePath.empty()) {
+        if (region.empty() || bucketName.empty() || objectKey.empty() || 
+            localFilePath.empty() || patientId.empty()) {
             manager.updateProgress(uploadId, UPLOAD_FAILED, "Invalid parameters");
             return;
         }
@@ -86,8 +85,14 @@ void asyncUploadWorker(const String& uploadId,
             return;
         }
 
-        // Step 9: Create S3 client using helper function
-        Aws::S3::S3Client s3Client = createS3Client(accessKey, secretKey, sessionToken, region);
+        // Step 9: Create S3 client using S3ClientManager
+        auto token_fetcher = [](const std::string& patient_id) -> nlohmann::json {
+            return HippoClient::GetS3Credentials(patient_id);
+        };
+        
+        S3ClientManager s3_manager(region, token_fetcher);
+        auto s3_client_proxy = s3_manager.get_refreshing_client(patientId);
+        auto s3Client = s3_client_proxy->get_client();
 
         // Step 10: Create S3 PutObject request
         Aws::S3::Model::PutObjectRequest request;
@@ -135,7 +140,7 @@ void asyncUploadWorker(const String& uploadId,
             }
             
             // Execute the actual S3 upload operation
-            auto outcome = s3Client.PutObject(request);
+            auto outcome = s3Client->PutObject(request);
             
             if (outcome.IsSuccess()) {
                 // Upload succeeded - exit retry loop
@@ -162,6 +167,53 @@ void asyncUploadWorker(const String& uploadId,
             progress->endTime = std::chrono::steady_clock::now();
             manager.updateProgress(uploadId, UPLOAD_SUCCESS);
             AWS_LOGSTREAM_INFO("S3Upload", "Async upload SUCCESS for ID: " << uploadId);
+            
+            // Step 15.1: Check if this is the last file in a folder upload
+            auto allUploads = manager.getAllUploadsByDataId(progress->dataId);
+            bool allFilesCompleted = true;
+            long long totalFolderSize = 0;
+            
+            for (auto& upload : allUploads) {
+                if (upload && upload->status != UPLOAD_SUCCESS && upload->status != CONFIRM_SUCCESS) {
+                    allFilesCompleted = false;
+                    break;
+                }
+                if (upload) {
+                    totalFolderSize += upload->totalSize;
+                }
+            }
+            
+            // Step 15.2: Attempt confirmation if this is the last file or single file
+            if (allFilesCompleted && !progress->confirmationAttempted && !progress->dataId.empty()) {
+                progress->confirmationAttempted = true;
+                AWS_LOGSTREAM_INFO("S3Upload", "All files completed, attempting confirmation for dataId: " << progress->dataId);
+                
+                bool confirmSuccess = ConfirmUploadRawFile(
+                    progress->dataId,
+                    progress->uploadDataName,
+                    progress->patientId,
+                    totalFolderSize, // Use total folder size for confirmation
+                    progress->s3ObjectKey
+                );
+                
+                if (confirmSuccess) {
+                    // Update all uploads to CONFIRM_SUCCESS
+                    for (auto& upload : allUploads) {
+                        if (upload && upload->status == UPLOAD_SUCCESS) {
+                            manager.updateProgress(upload->uploadId, CONFIRM_SUCCESS);
+                        }
+                    }
+                    AWS_LOGSTREAM_INFO("S3Upload", "Backend confirmation SUCCESS for dataId: " << progress->dataId);
+                } else {
+                    // Update all uploads to CONFIRM_FAILED
+                    for (auto& upload : allUploads) {
+                        if (upload && upload->status == UPLOAD_SUCCESS) {
+                            manager.updateProgress(upload->uploadId, CONFIRM_FAILED);
+                        }
+                    }
+                    AWS_LOGSTREAM_WARN("S3Upload", "Backend confirmation FAILED for dataId: " << progress->dataId << " (uploads still successful)");
+                }
+            }
         } else {
             manager.updateProgress(uploadId, UPLOAD_FAILED, finalErrorMsg);
             AWS_LOGSTREAM_ERROR("S3Upload", "Async upload FAILED for ID: " << uploadId << " after " << (MAX_UPLOAD_RETRIES + 1) << " attempts - " << finalErrorMsg);
@@ -206,19 +258,17 @@ void asyncUploadWorker(const String& uploadId,
 // Exported async upload function - starts file upload in background thread
 // Returns JSON with upload ID on success, error message on failure
 extern "C" S3UPLOAD_API const char* __stdcall UploadFileAsync(
-    const char* accessKey,
-    const char* secretKey,
-    const char* sessionToken,
     const char* region,
     const char* bucketName,
     const char* objectKey,
     const char* localFilePath,
-    const char* dataId
+    const char* dataId,
+    const char* patientId
 ) {
     static std::string response;
 
     // Step 1: Validate input parameters
-    if (!accessKey || !secretKey || !region || !bucketName || !objectKey || !localFilePath || !dataId) {
+    if (!region || !bucketName || !objectKey || !localFilePath || !dataId || !patientId) {
         response = create_response(UPLOAD_FAILED, formatErrorMessage(ErrorMessage::INVALID_PARAMETERS));
         return response.c_str();
     }
@@ -257,22 +307,20 @@ extern "C" S3UPLOAD_API const char* __stdcall UploadFileAsync(
         String uploadId = getUploadId(dataId, timestamp);
 
         // Step 4: Register upload with manager for progress tracking and queue
-        manager.addUpload(uploadId, localFilePath, objectKey);
+        // uploadDataName and dataId will be automatically extracted inside addUpload
+        manager.addUpload(uploadId, localFilePath, objectKey, patientId);
 
         // Step 5: Convert C-style parameters to C++ strings (avoid pointer lifetime issues)
-        String strAccessKey = accessKey;
-        String strSecretKey = secretKey;
-        String strSessionToken = sessionToken ? sessionToken : "";
         String strRegion = region;
         String strBucketName = bucketName;
         String strObjectKey = objectKey;
         String strLocalFilePath = localFilePath;
         String strDataId = dataId;
+        String strPatientId = patientId;
 
         // Step 6: Start background thread for async upload (will be queued automatically)
         std::thread uploadThread(asyncUploadWorker, uploadId,
-                               strAccessKey, strSecretKey, strSessionToken,
-                               strRegion, strBucketName, strObjectKey, strLocalFilePath, strDataId);
+                               strRegion, strBucketName, strObjectKey, strLocalFilePath, strDataId, strPatientId);
         uploadThread.detach(); // Detach thread so it runs independently
 
         // Step 7: Return success response with upload ID
@@ -342,12 +390,31 @@ extern "C" S3UPLOAD_API int __stdcall GetAsyncUploadStatusBytes(
             }
         }
         
-        // Step 4: Determine overall status
+        // Step 4: Determine overall status and handle folder confirmation
         int overallStatus;
         if (anyFailed) {
             overallStatus = UPLOAD_FAILED;
         } else if (allCompleted && !anyUploading) {
-            overallStatus = UPLOAD_SUCCESS;
+            // Check confirmation status
+            bool allConfirmed = true;
+            bool anyConfirmFailed = false;
+            
+            for (auto& progress : allUploads) {
+                if (progress->status == CONFIRM_FAILED) {
+                    anyConfirmFailed = true;
+                    allConfirmed = false;
+                } else if (progress->status != CONFIRM_SUCCESS) {
+                    allConfirmed = false;
+                }
+            }
+            
+            if (allConfirmed) {
+                overallStatus = CONFIRM_SUCCESS;
+            } else if (anyConfirmFailed) {
+                overallStatus = CONFIRM_FAILED;
+            } else {
+                overallStatus = UPLOAD_SUCCESS; // Upload completed, confirmation may be in progress
+            }
         } else {
             overallStatus = UPLOAD_UPLOADING;
         }
@@ -426,15 +493,13 @@ extern "C" S3UPLOAD_API int __stdcall GetAsyncUploadStatusBytes(
 
 // Clean up uploads by dataId - removes all uploads that match the dataId prefix
 // Returns JSON response indicating success or failure
-extern "C" S3UPLOAD_API const char* __stdcall CleanupUploadsByDataId(
-    const char* dataId
-) {
-    static std::string response;
-
+// Internal function to cleanup uploads by dataId
+// Called automatically after successful confirmation
+void CleanupUploadsByDataId(const String& dataId) {
     // Step 1: Validate input parameters
-    if (!dataId) {
-        response = create_response(UPLOAD_FAILED, formatErrorMessage(ErrorMessage::INVALID_PARAMETERS));
-        return response.c_str();
+    if (dataId.empty()) {
+        AWS_LOGSTREAM_WARN("S3Upload", "CleanupUploadsByDataId called with empty dataId");
+        return;
     }
 
     try {
@@ -444,8 +509,8 @@ extern "C" S3UPLOAD_API const char* __stdcall CleanupUploadsByDataId(
         
         if (allUploads.empty()) {
             // No uploads found with this dataId
-            response = create_response(UPLOAD_SUCCESS, "No uploads found with dataId: " + std::string(dataId));
-            return response.c_str();
+            AWS_LOGSTREAM_INFO("S3Upload", "No uploads found to cleanup for dataId: " << dataId);
+            return;
         }
 
         // Step 3: Remove all uploads that match the dataId
@@ -463,23 +528,14 @@ extern "C" S3UPLOAD_API const char* __stdcall CleanupUploadsByDataId(
             removedCount++;
         }
 
-        // Step 4: Return success response with cleanup count
-        std::string message = "Successfully cleaned up " + std::to_string(removedCount) + " upload(s) for dataId: " + std::string(dataId);
-        response = create_response(UPLOAD_SUCCESS, message);
-        
-        AWS_LOGSTREAM_INFO("S3Upload", "Cleanup completed: " << message);
-        return response.c_str();
+        // Step 4: Log cleanup completion
+        AWS_LOGSTREAM_INFO("S3Upload", "Successfully cleaned up " << removedCount << " upload(s) for dataId: " << dataId);
 
     } catch (const std::exception& e) {
         // Step 5: Handle exceptions during cleanup
-        std::string errorMsg = "Failed to cleanup uploads: " + std::string(e.what());
-        response = create_response(UPLOAD_FAILED, formatErrorMessage("Cleanup failed", e.what()));
-        AWS_LOGSTREAM_ERROR("S3Upload", "Exception during cleanup: " << e.what());
-        return response.c_str();
+        AWS_LOGSTREAM_ERROR("S3Upload", "Exception during cleanup for dataId " << dataId << ": " << e.what());
     } catch (...) {
         // Step 6: Handle unknown exceptions
-        response = create_response(UPLOAD_FAILED, formatErrorMessage("Cleanup failed", ErrorMessage::UNKNOWN_ERROR));
-        AWS_LOGSTREAM_ERROR("S3Upload", "Unknown exception during cleanup");
-        return response.c_str();
+        AWS_LOGSTREAM_ERROR("S3Upload", "Unknown exception during cleanup for dataId: " << dataId);
     }
 }
