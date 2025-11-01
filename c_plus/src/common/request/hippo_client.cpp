@@ -47,6 +47,7 @@ json HippoClient::GetS3Credentials(const std::string& patientId) {
     };
 
     json resp = RequestWithToken("POST", url, payload);
+    std::cout << "[get_s3_credentials] response:\n" << resp << std::endl;
     return resp;
 }
 

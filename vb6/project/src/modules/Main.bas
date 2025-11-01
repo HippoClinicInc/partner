@@ -91,6 +91,7 @@ Sub Main()
     
     ' 6. Use the AWS SDK to update file or folder to S3.
     sdkInitResult = SetCredential(LOGIN_ACCOUNT, LOGIN_ACCOUNT_PASSWORD)
+
     Dim jsonResponse As Object
     Set jsonResponse = JsonConverter.ParseJson(sdkInitResult)
 
@@ -302,8 +303,10 @@ Private Function MonitorUploadStatus(ByVal dataId As String, ByVal maxWaitTime A
     Dim waitTime As Long
     Dim statusCode As Long
     Dim uploadStatus As Long
+    Dim hasSeenValidStatus As Boolean ' Track if we've seen a valid status before
 
     waitTime = 0
+    hasSeenValidStatus = False
 
     Do While waitTime < maxWaitTime
         ' Use byte array method for safer data transfer
@@ -345,6 +348,7 @@ ParseResponse:
         If statusCode = 2 Then
             ' Parse the status from the message field (which contains JSON string)
             uploadStatus = statusObj("status")
+            hasSeenValidStatus = True ' Mark that we've seen a valid status
 
             If uploadStatus = 7 Then ' CONFIRM_SUCCESS - Upload and confirmation completed
                 isCompleted = True
@@ -360,10 +364,23 @@ ParseResponse:
                 Debug.Print "ERROR: Upload failed - " & statusObj("errorMessage")
                 Exit Do
             End If
+        ElseIf statusCode = 3 Then
+            ' Task has been cleaned up (usually means upload completed successfully)
+            If hasSeenValidStatus Then
+                ' If we've seen valid status before, this likely means upload succeeded and was cleaned up
+                Debug.Print "INFO: Upload task has been cleaned up (likely completed successfully)"
+                isCompleted = True
+                Exit Do
+            Else
+                ' If this is the first query and task is already cleaned up, it's an error
+                isError = True
+                Debug.Print "ERROR: Upload task not found - " & statusObj("message")
+                Exit Do
+            End If
         Else
-            ' Status check failed
+            ' Status check failed with other error codes
             isError = True
-            Debug.Print "ERROR: Failed to get upload status - " & statusObj("errorMessage")
+            Debug.Print "ERROR: Failed to get upload status - " & statusObj("message")
             Exit Do
         End If
 

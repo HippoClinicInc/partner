@@ -3,7 +3,7 @@ echo Building S3UploadLib.dll with Visual Studio 2022
 echo.
 
 REM Set VS 2022 environment
-call "F:\visualStudio\VC\Auxiliary\Build\vcvars32.bat"
+call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars32.bat"
 
 echo Build environment setup complete
 echo.
@@ -78,10 +78,10 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-echo.
 echo Step 8: Copying AWS SDK DLLs to build directory...
 copy "aws-sdk-cpp\bin\*.dll" "build\" >nul 2>&1
-echo AWS SDK DLLs copied to build directory
+copy "vcpkg\installed\x86-windows\bin\*.dll" "build\" >nul 2>&1
+echo DLLs copied to build directory
 
 echo.
 echo Build successful! Generated files in build directory:

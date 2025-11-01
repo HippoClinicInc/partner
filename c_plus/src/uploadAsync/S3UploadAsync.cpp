@@ -86,15 +86,37 @@ void asyncUploadWorker(const String& uploadId,
         }
 
         // Step 9: Create S3 client using S3ClientManager
+
+        // ----------------  token fetcher ----------------
         auto token_fetcher = [](const std::string& patient_id) -> nlohmann::json {
-            return HippoClient::GetS3Credentials(patient_id);
+            auto resp = HippoClient::GetS3Credentials(patient_id);
+            AWS_LOGSTREAM_INFO("S3Upload", "get_s3_credentials: " << resp);
+            return resp;
         };
-        
+
+        // ----------------  S3ClientManager ----------------
+        AWS_LOGSTREAM_INFO("S3Upload", "Creating S3ClientManager for region: " << region << ", patientId: " << patientId);
         S3ClientManager s3_manager(region, token_fetcher);
         auto s3_client_proxy = s3_manager.get_refreshing_client(patientId);
+        
+        if (!s3_client_proxy) {
+            manager.updateProgress(uploadId, UPLOAD_FAILED, "Failed to create S3 client proxy");
+            AWS_LOGSTREAM_ERROR("S3Upload", "Failed to create S3 client proxy for patientId: " << patientId);
+            return;
+        }
+        
         auto s3Client = s3_client_proxy->get_client();
+        
+        if (!s3Client) {
+            manager.updateProgress(uploadId, UPLOAD_FAILED, "Failed to get S3 client");
+            AWS_LOGSTREAM_ERROR("S3Upload", "Failed to get S3 client from proxy");
+            return;
+        }
+        
+        AWS_LOGSTREAM_INFO("S3Upload", "S3 client created successfully");
 
         // Step 10: Create S3 PutObject request
+        AWS_LOGSTREAM_INFO("S3Upload", "Creating PutObject request - Bucket: " << bucketName << ", Key: " << objectKey);
         Aws::S3::Model::PutObjectRequest request;
         request.SetBucket(bucketName);
         request.SetKey(objectKey);
@@ -106,20 +128,31 @@ void asyncUploadWorker(const String& uploadId,
         }
 
         // Step 12: Open file stream for reading
+        AWS_LOGSTREAM_INFO("S3Upload", "Opening file for reading: " << localFilePath);
         auto inputData = Aws::MakeShared<Aws::FStream>("PutObjectInputStream",
                                                        localFilePath.c_str(),
                                                        std::ios_base::in | std::ios_base::binary);
 
         if (!inputData->is_open()) {
-            manager.updateProgress(uploadId, UPLOAD_FAILED, "Cannot open file for reading");
+            std::string errorMsg = "Cannot open file for reading: " + localFilePath;
+            manager.updateProgress(uploadId, UPLOAD_FAILED, errorMsg);
+            AWS_LOGSTREAM_ERROR("S3Upload", errorMsg);
             return;
         }
+        
+        // Get file size from stream for logging (already got fileSize earlier, but verify consistency)
+        inputData->seekg(0, std::ios::end);
+        auto streamPos = inputData->tellg();
+        inputData->seekg(0, std::ios::beg);
+        long long streamFileSize = static_cast<long long>(streamPos);
+        AWS_LOGSTREAM_INFO("S3Upload", "File opened successfully, size: " << streamFileSize << " bytes");
 
         // Step 13: Set request body and content type
         request.SetBody(inputData);
         request.SetContentType("application/octet-stream");
 
-        AWS_LOGSTREAM_INFO("S3Upload", "Starting S3 PutObject operation...");
+        AWS_LOGSTREAM_INFO("S3Upload", "Starting S3 PutObject operation - Bucket: " << bucketName 
+                          << ", Key: " << objectKey << ", Size: " << streamFileSize << " bytes");
 
         // Step 14: Execute S3 upload with retry mechanism (up to 3 retries on failure)
         bool uploadSuccess = false;
@@ -140,21 +173,42 @@ void asyncUploadWorker(const String& uploadId,
             }
             
             // Execute the actual S3 upload operation
+            AWS_LOGSTREAM_INFO("S3Upload", "Executing PutObject (attempt " << (retryCount + 1) << "/" << (MAX_UPLOAD_RETRIES + 1) << ") for upload ID: " << uploadId);
             auto outcome = s3Client->PutObject(request);
             
             if (outcome.IsSuccess()) {
                 // Upload succeeded - exit retry loop
                 uploadSuccess = true;
                 AWS_LOGSTREAM_INFO("S3Upload", "Async upload SUCCESS for ID: " << uploadId << " (attempt " << (retryCount + 1) << ")");
+                
+                // Log ETag if available
+                if (outcome.GetResult().GetETag().size() > 0) {
+                    AWS_LOGSTREAM_INFO("S3Upload", "Upload ETag: " << outcome.GetResult().GetETag());
+                }
                 break;
             } else {
-                // Upload failed - log error and prepare for potential retry
+                // Upload failed - log detailed error information
                 auto error = outcome.GetError();
-                finalErrorMsg = "S3 upload failed (attempt " + std::to_string(retryCount + 1) + "): " + std::string(error.GetMessage().c_str());
-                AWS_LOGSTREAM_WARN("S3Upload", "Upload attempt " << (retryCount + 1) << " failed for ID: " << uploadId << " - " << finalErrorMsg);
+                std::string errorType = error.GetExceptionName();
+                std::string errorMessage = error.GetMessage();
+                int httpResponseCode = static_cast<int>(error.GetResponseCode());
+                
+                finalErrorMsg = "S3 upload failed (attempt " + std::to_string(retryCount + 1) + "): " + errorMessage;
+                
+                AWS_LOGSTREAM_ERROR("S3Upload", "Upload attempt " << (retryCount + 1) << " failed for ID: " << uploadId);
+                AWS_LOGSTREAM_ERROR("S3Upload", "  - Error Type: " << errorType);
+                AWS_LOGSTREAM_ERROR("S3Upload", "  - Error Message: " << errorMessage);
+                AWS_LOGSTREAM_ERROR("S3Upload", "  - HTTP Response Code: " << httpResponseCode);
+                
+                // Log request ID if available
+                if (error.GetRequestId().size() > 0) {
+                    AWS_LOGSTREAM_ERROR("S3Upload", "  - Request ID: " << error.GetRequestId());
+                }
+                
                 
                 // If this is the last attempt, exit retry loop
                 if (retryCount == MAX_UPLOAD_RETRIES) {
+                    AWS_LOGSTREAM_ERROR("S3Upload", "All retry attempts exhausted for upload ID: " << uploadId);
                     break;
                 }
             }
