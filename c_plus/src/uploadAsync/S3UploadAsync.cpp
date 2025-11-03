@@ -242,12 +242,25 @@ void asyncUploadWorker(const String& uploadId,
                 progress->confirmationAttempted = true;
                 AWS_LOGSTREAM_INFO("S3Upload", "All files completed, attempting confirmation for dataId: " << progress->dataId);
                 
+                // Determine if this is a folder upload and extract parent directory path if needed
+                String confirmObjectKey = progress->s3ObjectKey;
+                bool isFolderUpload = allUploads.size() > 1;
+                
+                if (isFolderUpload) {
+                    // For folder uploads, extract parent directory path (remove filename, keep directory with trailing slash)
+                    size_t lastSlash = progress->s3ObjectKey.find_last_of('/');
+                    if (lastSlash != String::npos) {
+                        confirmObjectKey = progress->s3ObjectKey.substr(0, lastSlash + 1);
+                        AWS_LOGSTREAM_INFO("S3Upload", "Folder upload detected - using parent directory: " << confirmObjectKey);
+                    }
+                }
+                
                 bool confirmSuccess = ConfirmUploadRawFile(
                     progress->dataId,
                     progress->uploadDataName,
                     progress->patientId,
                     totalFolderSize, // Use total folder size for confirmation
-                    progress->s3ObjectKey
+                    confirmObjectKey
                 );
                 
                 if (confirmSuccess) {
