@@ -48,7 +48,7 @@ struct S3Credential {
             // Check for overflow/underflow: time_t may be 32-bit or 64-bit
             // Ensure value is within reasonable time_t range
             if (expiration_ll < 0 || 
-                expiration_ll > static_cast<long long>(std::numeric_limits<std::time_t>::max())) {
+                expiration_ll > static_cast<long long>((std::numeric_limits<std::time_t>::max)())) {
                 throw std::out_of_range("Expiration timestamp out of range: " + expiration_str);
             }
             credential.expiration = static_cast<std::time_t>(expiration_ll);

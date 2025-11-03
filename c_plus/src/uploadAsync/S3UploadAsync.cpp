@@ -95,10 +95,10 @@ void asyncUploadWorker(const String& uploadId,
 
         // Initialize S3ClientManager with the specified region and credentials fetcher
         AWS_LOGSTREAM_INFO("S3Upload", "Creating S3ClientManager for region: " << region << ", patientId: " << patientId);
-        S3ClientManager s3_client_manager(region, credentials_fetcher);
+        auto s3_client_manager = std::make_shared<S3ClientManager>(region, credentials_fetcher);
         
         // Get a refreshing client proxy that automatically handles credential refresh
-        auto s3_client_proxy = s3_client_manager.get_refreshing_client(patientId);
+        auto s3_client_proxy = s3_client_manager->get_refreshing_client(patientId);
         
         // Verify that the client proxy was created successfully
         if (!s3_client_proxy) {
@@ -107,17 +107,7 @@ void asyncUploadWorker(const String& uploadId,
             return;
         }
         
-        // Extract the underlying S3 client from the proxy
-        auto s3_client = s3_client_proxy->get_client();
-        
-        // Verify that the S3 client was retrieved successfully
-        if (!s3_client) {
-            manager.updateProgress(uploadId, UPLOAD_FAILED, "Failed to get S3 client");
-            AWS_LOGSTREAM_ERROR("S3Upload", "Failed to get S3 client from proxy");
-            return;
-        }
-        
-        AWS_LOGSTREAM_INFO("S3Upload", "S3 client created successfully");
+        AWS_LOGSTREAM_INFO("S3Upload", "S3 client proxy created successfully");
 
         // Step 10: Create S3 PutObject request
         AWS_LOGSTREAM_INFO("S3Upload", "Creating PutObject request - Bucket: " << bucketName << ", Key: " << objectKey);
@@ -178,7 +168,9 @@ void asyncUploadWorker(const String& uploadId,
             
             // Execute the actual S3 upload operation
             AWS_LOGSTREAM_INFO("S3Upload", "Executing PutObject (attempt " << (retryCount + 1) << "/" << (MAX_UPLOAD_RETRIES + 1) << ") for upload ID: " << uploadId);
-            auto outcome = s3_client->PutObject(request);
+            auto outcome = s3_client_proxy->with_auto_refresh([&](std::shared_ptr<Aws::S3::S3Client> client) {
+                return client->PutObject(request);
+            });
             
             if (outcome.IsSuccess()) {
                 // Upload succeeded - exit retry loop
