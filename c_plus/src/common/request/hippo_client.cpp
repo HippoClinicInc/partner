@@ -15,6 +15,7 @@ std::string HippoClient::account_;
 std::string HippoClient::password_;
 std::string HippoClient::jwt_token_;
 std::string HippoClient::hospital_id_;
+const std::string HippoClient::HTTP_STATUS_UNAUTHORIZED = "401";
 
 // Public interface
 void HippoClient::Init(const std::string& baseUrl, const std::string& account, const std::string& password) {
@@ -116,7 +117,7 @@ json HippoClient::RequestWithToken(const std::string& method,
                       << ") for URL=" << url << ": " << error_message << std::endl;
 
             // Check if error is due to expired/invalid token (401 Unauthorized)
-            if (error_message.find("401") != std::string::npos) {
+            if (error_message.find(HTTP_STATUS_UNAUTHORIZED) != std::string::npos) {
                 std::cerr << "[HippoClient] Token expired, attempting re-login..." << std::endl;
                 jwt_token_.clear();
                 if (!LoginWithRetries()) {

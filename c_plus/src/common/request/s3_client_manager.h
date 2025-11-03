@@ -7,6 +7,8 @@
 #include <ctime>
 #include <string>
 #include <functional>
+#include <stdexcept>
+#include <limits>
 
 /**
  * Function type for fetching AWS S3 credentials token.
@@ -31,15 +33,34 @@ struct S3Credential {
      * @throws std::exception if required JSON fields are missing
      */
     static S3Credential from_json(const nlohmann::json& credential_json) {
-        const auto& temporary_credentials = credential_json.at("amazonTemporaryCredentials");
+        try {
+            const auto& temporary_credentials = credential_json.at("amazonTemporaryCredentials");
 
-        S3Credential credential;
-        credential.accessKeyId     = temporary_credentials.at("accessKeyId").get<std::string>();
-        credential.secretAccessKey = temporary_credentials.at("secretAccessKey").get<std::string>();
-        credential.sessionToken    = temporary_credentials.at("sessionToken").get<std::string>();
-        credential.expiration      = std::stoll(temporary_credentials.at("expirationTimestampSecondsInUTC").get<std::string>());
+            S3Credential credential;
+            credential.accessKeyId     = temporary_credentials.at("accessKeyId").get<std::string>();
+            credential.secretAccessKey = temporary_credentials.at("secretAccessKey").get<std::string>();
+            credential.sessionToken    = temporary_credentials.at("sessionToken").get<std::string>();
+            
+            // Safe conversion with overflow/underflow checking
+            const std::string expiration_str = temporary_credentials.at("expirationTimestampSecondsInUTC").get<std::string>();
+            const long long expiration_ll = std::stoll(expiration_str);
+            
+            // Check for overflow/underflow: time_t may be 32-bit or 64-bit
+            // Ensure value is within reasonable time_t range
+            if (expiration_ll < 0 || 
+                expiration_ll > static_cast<long long>(std::numeric_limits<std::time_t>::max())) {
+                throw std::out_of_range("Expiration timestamp out of range: " + expiration_str);
+            }
+            credential.expiration = static_cast<std::time_t>(expiration_ll);
 
-        return credential;
+            return credential;
+        } catch (const nlohmann::json::exception& e) {
+            throw std::runtime_error("JSON parsing error: " + std::string(e.what()));
+        } catch (const std::invalid_argument& e) {
+            throw std::runtime_error("Invalid expiration timestamp format: " + std::string(e.what()));
+        } catch (const std::out_of_range& e) {
+            throw; // Re-throw out_of_range from our own checks
+        }
     }
 };
 
@@ -56,20 +77,21 @@ class RefreshingS3Client {
 public:
     /**
      * Constructs a RefreshingS3Client with a manager and patient ID.
-     * @param manager Pointer to the S3ClientManager that handles credential refresh
+     * @param manager Shared pointer to the S3ClientManager that handles credential refresh
      * @param patient_id Patient ID used to fetch credentials
      */
-    RefreshingS3Client(S3ClientManager* manager, const std::string& patient_id);
+    RefreshingS3Client(std::shared_ptr<S3ClientManager> manager, const std::string& patient_id);
 
     /**
      * Gets the S3 client, automatically refreshing credentials if needed.
      * @return Shared pointer to the S3 client
+     * @throws std::runtime_error if manager is null
      */
     std::shared_ptr<Aws::S3::S3Client> get_client();
 
 private:
-    S3ClientManager* manager_;    ///< Pointer to the S3ClientManager
-    std::string patient_id_;      ///< Patient ID for credential fetching
+    std::weak_ptr<S3ClientManager> manager_;    ///< Weak pointer to the S3ClientManager to avoid circular reference
+    std::string patient_id_;                    ///< Patient ID for credential fetching
 };
 
 /**
@@ -77,8 +99,11 @@ private:
  * This class handles credential expiration and patient ID changes,
  * automatically refreshing S3 clients when necessary.
  * Thread-safe implementation using mutex for concurrent access.
+ * 
+ * NOTE: This class must be managed by std::shared_ptr to use get_refreshing_client().
+ * For stack-allocated instances, use get_client() directly instead.
  */
-class S3ClientManager {
+class S3ClientManager : public std::enable_shared_from_this<S3ClientManager> {
 public:
     /**
      * Constructs an S3ClientManager with the specified configuration.

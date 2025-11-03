@@ -90,6 +90,7 @@ private:
   static std::string password_;      ///< User password
   static std::string jwt_token_;     ///< Current JWT authentication token
   static std::string hospital_id_;   ///< Hospital identifier from login response
+  static const std::string HTTP_STATUS_UNAUTHORIZED; ///< HTTP 401 status code string
 };
 
 #endif // HIPPO_CLIENT_H

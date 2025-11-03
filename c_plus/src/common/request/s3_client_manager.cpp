@@ -6,11 +6,15 @@
 
 using json = nlohmann::json;
 
-RefreshingS3Client::RefreshingS3Client(S3ClientManager* manager, const std::string& patient_id)
+RefreshingS3Client::RefreshingS3Client(std::shared_ptr<S3ClientManager> manager, const std::string& patient_id)
     : manager_(manager), patient_id_(patient_id) {}
 
 std::shared_ptr<Aws::S3::S3Client> RefreshingS3Client::get_client() {
-    return manager_->get_client(patient_id_);
+    auto manager = manager_.lock();
+    if (!manager) {
+        throw std::runtime_error("S3ClientManager has been destroyed");
+    }
+    return manager->get_client(patient_id_);
 }
 
 // ---------------- S3ClientManager Implementation ----------------
@@ -36,6 +40,11 @@ bool S3ClientManager::need_refresh(const std::string& patient_id) {
     }
 
     // Refresh if credentials are expiring soon (within refresh_margin_ seconds)
+    // Use safe subtraction to avoid integer underflow/overflow
+    if (refresh_margin_ >= current_credential_.expiration) {
+        // If margin is larger than expiration, definitely need refresh
+        return true;
+    }
     if (current_time > current_credential_.expiration - refresh_margin_) {
         return true;
     }
@@ -55,18 +64,42 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientManager::get_client(const std::string
 }
 
 std::shared_ptr<RefreshingS3Client> S3ClientManager::get_refreshing_client(const std::string& patient_id) {
-    return std::make_shared<RefreshingS3Client>(this, patient_id);
+    // Use shared_from_this to safely create a shared_ptr to this instance
+    // This requires that S3ClientManager is managed by std::shared_ptr
+    try {
+        return std::make_shared<RefreshingS3Client>(shared_from_this(), patient_id);
+    } catch (const std::bad_weak_ptr&) {
+        throw std::runtime_error(
+            "S3ClientManager must be managed by std::shared_ptr to use get_refreshing_client(). "
+            "Use get_client() directly for stack-allocated instances.");
+    }
 }
 
 std::shared_ptr<Aws::S3::S3Client> S3ClientManager::refresh_client(const std::string& patient_id) {
     AWS_LOGSTREAM_INFO("S3ClientManager", "Refreshing client for patient_id: " << patient_id);
 
     // Fetch credentials from token fetcher
-    json credential_json = token_fetcher_(patient_id);
-    AWS_LOGSTREAM_INFO("S3ClientManager", "Fetched credentials JSON: " << credential_json);
+    json credential_json;
+    try {
+        credential_json = token_fetcher_(patient_id);
+    } catch (const std::exception& e) {
+        AWS_LOGSTREAM_ERROR("S3ClientManager", "Failed to fetch credentials for patient_id: " 
+                           << patient_id << ", error: " << e.what());
+        throw; // Re-throw to let caller handle the error
+    }
+    // Log credential fetch success without exposing sensitive data
+    AWS_LOGSTREAM_INFO("S3ClientManager", "Successfully fetched credentials JSON (size: " 
+                       << credential_json.dump().length() << " bytes)");
 
     // Parse credentials from JSON
-    S3Credential credential = S3Credential::from_json(credential_json);
+    S3Credential credential;
+    try {
+        credential = S3Credential::from_json(credential_json);
+    } catch (const std::exception& e) {
+        AWS_LOGSTREAM_ERROR("S3ClientManager", "Failed to parse credentials JSON for patient_id: " 
+                           << patient_id << ", error: " << e.what());
+        throw; // Re-throw to let caller handle the error
+    }
 
     // Configure S3 client with timeout settings and disable IMDS
     // Using ClientConfiguration instead of S3ClientConfiguration to avoid linker symbol conflicts
