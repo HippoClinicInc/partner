@@ -83,12 +83,12 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientManager::refresh_client(const std::st
     try {
         credential_json = token_fetcher_(patient_id);
     } catch (const std::exception& e) {
-        AWS_LOGSTREAM_ERROR("S3ClientManager", "Failed to fetch credentials for patient_id: " 
+        AWS_LOGSTREAM_ERROR("S3ClientManager", "Failed to fetch credentials for patient_id: "
                            << patient_id << ", error: " << e.what());
         throw; // Re-throw to let caller handle the error
     }
     // Log credential fetch success without exposing sensitive data
-    AWS_LOGSTREAM_INFO("S3ClientManager", "Successfully fetched credentials JSON (size: " 
+    AWS_LOGSTREAM_INFO("S3ClientManager", "Successfully fetched credentials JSON (size: "
                        << credential_json.dump().length() << " bytes)");
 
     // Parse credentials from JSON
@@ -96,7 +96,7 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientManager::refresh_client(const std::st
     try {
         credential = S3Credential::from_json(credential_json);
     } catch (const std::exception& e) {
-        AWS_LOGSTREAM_ERROR("S3ClientManager", "Failed to parse credentials JSON for patient_id: " 
+        AWS_LOGSTREAM_ERROR("S3ClientManager", "Failed to parse credentials JSON for patient_id: "
                            << patient_id << ", error: " << e.what());
         throw; // Re-throw to let caller handle the error
     }
@@ -158,5 +158,4 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientManager::force_refresh(const std::str
     std::lock_guard<std::mutex> lock(mutex_);
     return refresh_client(patient_id);
 }
-
 
