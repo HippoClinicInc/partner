@@ -86,28 +86,32 @@ void asyncUploadWorker(const String& uploadId,
         }
 
         // Step 9: Create S3 client using S3ClientManager
-
-        // ----------------  token fetcher ----------------
-        auto token_fetcher = [](const std::string& patient_id) -> nlohmann::json {
-            auto resp = HippoClient::GetS3Credentials(patient_id);
-            AWS_LOGSTREAM_INFO("S3Upload", "get_s3_credentials: " << resp);
-            return resp;
+        // Define a lambda function to fetch S3 credentials for the patient
+        auto credentials_fetcher = [](const std::string& patient_id) -> nlohmann::json {
+            auto response = HippoClient::GetS3Credentials(patient_id);
+            AWS_LOGSTREAM_INFO("S3Upload", "get_s3_credentials: " << response);
+            return response;
         };
 
-        // ----------------  S3ClientManager ----------------
+        // Initialize S3ClientManager with the specified region and credentials fetcher
         AWS_LOGSTREAM_INFO("S3Upload", "Creating S3ClientManager for region: " << region << ", patientId: " << patientId);
-        S3ClientManager s3_manager(region, token_fetcher);
-        auto s3_client_proxy = s3_manager.get_refreshing_client(patientId);
+        S3ClientManager s3_client_manager(region, credentials_fetcher);
         
+        // Get a refreshing client proxy that automatically handles credential refresh
+        auto s3_client_proxy = s3_client_manager.get_refreshing_client(patientId);
+        
+        // Verify that the client proxy was created successfully
         if (!s3_client_proxy) {
             manager.updateProgress(uploadId, UPLOAD_FAILED, "Failed to create S3 client proxy");
             AWS_LOGSTREAM_ERROR("S3Upload", "Failed to create S3 client proxy for patientId: " << patientId);
             return;
         }
         
-        auto s3Client = s3_client_proxy->get_client();
+        // Extract the underlying S3 client from the proxy
+        auto s3_client = s3_client_proxy->get_client();
         
-        if (!s3Client) {
+        // Verify that the S3 client was retrieved successfully
+        if (!s3_client) {
             manager.updateProgress(uploadId, UPLOAD_FAILED, "Failed to get S3 client");
             AWS_LOGSTREAM_ERROR("S3Upload", "Failed to get S3 client from proxy");
             return;
@@ -174,7 +178,7 @@ void asyncUploadWorker(const String& uploadId,
             
             // Execute the actual S3 upload operation
             AWS_LOGSTREAM_INFO("S3Upload", "Executing PutObject (attempt " << (retryCount + 1) << "/" << (MAX_UPLOAD_RETRIES + 1) << ") for upload ID: " << uploadId);
-            auto outcome = s3Client->PutObject(request);
+            auto outcome = s3_client->PutObject(request);
             
             if (outcome.IsSuccess()) {
                 // Upload succeeded - exit retry loop
