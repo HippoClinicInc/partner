@@ -75,7 +75,7 @@ RetryRequest:
         Exit Function
     End If
 
-    RequestWithToken = (http.Status >= 200 And http.Status < 300)
+    RequestWithToken = (http.Status = 200)
     Set http = Nothing
     Exit Function
 
