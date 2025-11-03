@@ -86,7 +86,7 @@ private:
 
 private:
   static std::string base_url_;      ///< Base URL of the Hippo API server
-  static std::string account_;       ///< User account
+  static std::string account_;       ///< User account (email)
   static std::string password_;      ///< User password
   static std::string jwt_token_;     ///< Current JWT authentication token
   static std::string hospital_id_;   ///< Hospital identifier from login response
