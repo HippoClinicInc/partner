@@ -15,6 +15,7 @@ std::string HippoClient::account_;
 std::string HippoClient::password_;
 std::string HippoClient::jwt_token_;
 std::string HippoClient::hospital_id_;
+const std::string HippoClient::HTTP_STATUS_UNAUTHORIZED = "401";
 
 // Public interface
 void HippoClient::Init(const std::string& baseUrl, const std::string& account, const std::string& password) {
@@ -59,7 +60,7 @@ void HippoClient::Login() {
     }
 
     jwt_token_ = response["jwtToken"];
-    
+
     // Extract hospital ID from user info
     if (!response.contains("userInfo") || !response["userInfo"].contains("hospitalId")) {
         throw std::runtime_error("Login failed: missing hospitalId in response");
@@ -86,7 +87,7 @@ bool HippoClient::LoginWithRetries(int maxLoginRetries) {
             std::cerr << "[HippoClient] Login attempt " << (attempt + 1)
                       << " failed: " << error.what() << std::endl;
             attempt++;
-            
+
             // Exponential backoff: 2^attempt seconds (2s, 4s, 8s, ...)
             int sleep_time = 1 << attempt;
             if (attempt < maxLoginRetries) {
@@ -116,7 +117,7 @@ json HippoClient::RequestWithToken(const std::string& method,
                       << ") for URL=" << url << ": " << error_message << std::endl;
 
             // Check if error is due to expired/invalid token (401 Unauthorized)
-            if (error_message.find("401") != std::string::npos) {
+            if (error_message.find(HTTP_STATUS_UNAUTHORIZED) != std::string::npos) {
                 std::cerr << "[HippoClient] Token expired, attempting re-login..." << std::endl;
                 jwt_token_.clear();
                 if (!LoginWithRetries()) {
@@ -131,7 +132,7 @@ json HippoClient::RequestWithToken(const std::string& method,
             if (attempt >= maxRetries) {
                 throw; // Re-throw the last exception
             }
-            
+
             // Exponential backoff: 2^attempt seconds
             int sleep_time = 1 << attempt;
             std::cerr << "[HippoClient] Retrying after " << sleep_time << "s..." << std::endl;

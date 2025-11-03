@@ -7,6 +7,8 @@
 #include <ctime>
 #include <string>
 #include <functional>
+#include <stdexcept>
+#include <limits>
 
 /**
  * Function type for fetching AWS S3 credentials token.
@@ -31,15 +33,34 @@ struct S3Credential {
      * @throws std::exception if required JSON fields are missing
      */
     static S3Credential from_json(const nlohmann::json& credential_json) {
-        const auto& temporary_credentials = credential_json.at("amazonTemporaryCredentials");
+        try {
+            const auto& temporary_credentials = credential_json.at("amazonTemporaryCredentials");
 
-        S3Credential credential;
-        credential.accessKeyId     = temporary_credentials.at("accessKeyId").get<std::string>();
-        credential.secretAccessKey = temporary_credentials.at("secretAccessKey").get<std::string>();
-        credential.sessionToken    = temporary_credentials.at("sessionToken").get<std::string>();
-        credential.expiration      = std::stoll(temporary_credentials.at("expirationTimestampSecondsInUTC").get<std::string>());
-        
-        return credential;
+            S3Credential credential;
+            credential.accessKeyId     = temporary_credentials.at("accessKeyId").get<std::string>();
+            credential.secretAccessKey = temporary_credentials.at("secretAccessKey").get<std::string>();
+            credential.sessionToken    = temporary_credentials.at("sessionToken").get<std::string>();
+            
+            // Safe conversion with overflow/underflow checking
+            const std::string expiration_str = temporary_credentials.at("expirationTimestampSecondsInUTC").get<std::string>();
+            const long long expiration_ll = std::stoll(expiration_str);
+            
+            // Check for overflow/underflow: time_t may be 32-bit or 64-bit
+            // Ensure value is within reasonable time_t range
+            if (expiration_ll < 0 || 
+                expiration_ll > static_cast<long long>(std::numeric_limits<std::time_t>::max())) {
+                throw std::out_of_range("Expiration timestamp out of range: " + expiration_str);
+            }
+            credential.expiration = static_cast<std::time_t>(expiration_ll);
+
+            return credential;
+        } catch (const nlohmann::json::exception& e) {
+            throw std::runtime_error("JSON parsing error: " + std::string(e.what()));
+        } catch (const std::invalid_argument& e) {
+            throw std::runtime_error("Invalid expiration timestamp format: " + std::string(e.what()));
+        } catch (const std::out_of_range& e) {
+            throw; // Re-throw out_of_range from our own checks
+        }
     }
 };
 
@@ -56,20 +77,33 @@ class RefreshingS3Client {
 public:
     /**
      * Constructs a RefreshingS3Client with a manager and patient ID.
-     * @param manager Pointer to the S3ClientManager that handles credential refresh
+     * @param manager Shared pointer to the S3ClientManager that handles credential refresh
      * @param patient_id Patient ID used to fetch credentials
      */
-    RefreshingS3Client(S3ClientManager* manager, const std::string& patient_id);
-    
+    RefreshingS3Client(std::shared_ptr<S3ClientManager> manager, const std::string& patient_id);
+
     /**
      * Gets the S3 client, automatically refreshing credentials if needed.
      * @return Shared pointer to the S3 client
+     * @throws std::runtime_error if manager is null
      */
     std::shared_ptr<Aws::S3::S3Client> get_client();
 
+    /**
+     * Execute an S3 operation with auto refresh and one retry on expired credentials.
+     * The callable should accept a shared_ptr<Aws::S3::S3Client> and return an AWS Outcome type
+     * that provides IsSuccess() and GetError().
+     * @tparam Func Callable type
+     * @param func  Callable receiving shared_ptr<S3Client> and returning Outcome
+     * @return Outcome returned by the callable (possibly from the retry)
+     */
+    template <typename Func>
+    auto with_auto_refresh(Func&& func)
+        -> decltype(std::forward<Func>(func)(std::declval<std::shared_ptr<Aws::S3::S3Client>>()));
+
 private:
-    S3ClientManager* manager_;    ///< Pointer to the S3ClientManager
-    std::string patient_id_;      ///< Patient ID for credential fetching
+    std::weak_ptr<S3ClientManager> manager_;    ///< Weak pointer to the S3ClientManager to avoid circular reference
+    std::string patient_id_;                    ///< Patient ID for credential fetching
 };
 
 /**
@@ -77,8 +111,11 @@ private:
  * This class handles credential expiration and patient ID changes,
  * automatically refreshing S3 clients when necessary.
  * Thread-safe implementation using mutex for concurrent access.
+ * 
+ * NOTE: This class must be managed by std::shared_ptr to use get_refreshing_client().
+ * For stack-allocated instances, use get_client() directly instead.
  */
-class S3ClientManager {
+class S3ClientManager : public std::enable_shared_from_this<S3ClientManager> {
 public:
     /**
      * Constructs an S3ClientManager with the specified configuration.
@@ -98,7 +135,7 @@ public:
      * @return Shared pointer to the S3 client
      */
     std::shared_ptr<Aws::S3::S3Client> get_client(const std::string& patient_id);
-    
+
     /**
      * Creates a RefreshingS3Client wrapper for the specified patient ID.
      * This wrapper can be passed to other components and will automatically use the correct patient ID.
@@ -107,6 +144,12 @@ public:
      */
     std::shared_ptr<RefreshingS3Client> get_refreshing_client(const std::string& patient_id);
 
+    /**
+     * Force refresh the S3 client for a patient id regardless of current cached state.
+     * Thread-safe.
+     */
+    std::shared_ptr<Aws::S3::S3Client> force_refresh(const std::string& patient_id);
+
 private:
     /**
      * Checks if the S3 client needs to be refreshed.
@@ -114,7 +157,7 @@ private:
      * @return true if refresh is needed (patient ID changed, no client, or credentials expiring soon)
      */
     bool need_refresh(const std::string& patient_id);
-    
+
     /**
      * Refreshes the S3 client by fetching new credentials and creating a new client.
      * This method should only be called from get_client() which holds the mutex lock.
@@ -134,3 +177,45 @@ private:
 
     std::mutex mutex_;  ///< Mutex for thread-safe access
 };
+
+// ---- Template implementation ----
+template <typename Func>
+auto RefreshingS3Client::with_auto_refresh(Func&& func)
+    -> decltype(std::forward<Func>(func)(std::declval<std::shared_ptr<Aws::S3::S3Client>>())) {
+    auto manager = manager_.lock();
+    if (!manager) {
+        throw std::runtime_error("S3ClientManager has been destroyed");
+    }
+
+    // Retry indefinitely for expired-credential errors; do not retry for other errors
+    int attempt = 0;
+    std::shared_ptr<Aws::S3::S3Client> client;
+
+    while (true) {
+        if (attempt == 0) {
+            client = manager->get_client(patient_id_);
+        }
+        auto outcome = std::forward<Func>(func)(client);
+
+        if (outcome.IsSuccess()) {
+            return outcome;
+        }
+
+        const auto& error = outcome.GetError();
+        const std::string exception_name = error.GetExceptionName().c_str();
+        const std::string message = error.GetMessage().c_str();
+        const bool is_expired =
+            (exception_name.find("ExpiredToken") != std::string::npos) ||
+            (exception_name.find("RequestExpired") != std::string::npos) ||
+            (message.find("ExpiredToken") != std::string::npos) ||
+            (message.find("RequestExpired") != std::string::npos);
+
+        if (!is_expired) {
+            return outcome;
+        }
+
+        AWS_LOGSTREAM_INFO("RefreshingS3Client", "Detected expired credentials, refreshing and retrying (attempt " << (attempt + 1) << ") for patient_id=" << patient_id_);
+        client = manager->force_refresh(patient_id_);
+        ++attempt;
+    }
+}
