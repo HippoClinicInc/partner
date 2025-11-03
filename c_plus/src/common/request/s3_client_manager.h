@@ -40,15 +40,15 @@ struct S3Credential {
             credential.accessKeyId     = temporary_credentials.at("accessKeyId").get<std::string>();
             credential.secretAccessKey = temporary_credentials.at("secretAccessKey").get<std::string>();
             credential.sessionToken    = temporary_credentials.at("sessionToken").get<std::string>();
-            
+
             // Safe conversion with overflow/underflow checking
             const std::string expiration_str = temporary_credentials.at("expirationTimestampSecondsInUTC").get<std::string>();
             const long long expiration_ll = std::stoll(expiration_str);
-            
+
             // Check for overflow/underflow: time_t may be 32-bit or 64-bit
             // Ensure value is within reasonable time_t range
-            if (expiration_ll < 0 || 
-                expiration_ll > static_cast<long long>(std::numeric_limits<std::time_t>::max())) {
+            if (expiration_ll < 0 ||
+                expiration_ll > static_cast<long long>((std::numeric_limits<std::time_t>::max)())) {
                 throw std::out_of_range("Expiration timestamp out of range: " + expiration_str);
             }
             credential.expiration = static_cast<std::time_t>(expiration_ll);
@@ -111,7 +111,7 @@ private:
  * This class handles credential expiration and patient ID changes,
  * automatically refreshing S3 clients when necessary.
  * Thread-safe implementation using mutex for concurrent access.
- * 
+ *
  * NOTE: This class must be managed by std::shared_ptr to use get_refreshing_client().
  * For stack-allocated instances, use get_client() directly instead.
  */
@@ -179,6 +179,8 @@ private:
 };
 
 // ---- Template implementation ----
+// Retry limit for expired-credential retries used by with_auto_refresh()
+static const int kMaxExpiredRetries = 3;
 template <typename Func>
 auto RefreshingS3Client::with_auto_refresh(Func&& func)
     -> decltype(std::forward<Func>(func)(std::declval<std::shared_ptr<Aws::S3::S3Client>>())) {
@@ -187,7 +189,7 @@ auto RefreshingS3Client::with_auto_refresh(Func&& func)
         throw std::runtime_error("S3ClientManager has been destroyed");
     }
 
-    // Retry indefinitely for expired-credential errors; do not retry for other errors
+    // Retry for expired-credential errors; limit total retries by static count
     int attempt = 0;
     std::shared_ptr<Aws::S3::S3Client> client;
 
@@ -210,11 +212,11 @@ auto RefreshingS3Client::with_auto_refresh(Func&& func)
             (message.find("ExpiredToken") != std::string::npos) ||
             (message.find("RequestExpired") != std::string::npos);
 
-        if (!is_expired) {
+        if (!is_expired || attempt >= kMaxExpiredRetries) {
             return outcome;
         }
 
-        AWS_LOGSTREAM_INFO("RefreshingS3Client", "Detected expired credentials, refreshing and retrying (attempt " << (attempt + 1) << ") for patient_id=" << patient_id_);
+        AWS_LOGSTREAM_INFO("RefreshingS3Client", "Detected expired credentials, refreshing and retrying (attempt " << (attempt + 1) << "/" << kMaxExpiredRetries << ") for patient_id=" << patient_id_);
         client = manager->force_refresh(patient_id_);
         ++attempt;
     }
