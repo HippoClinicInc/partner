@@ -23,18 +23,34 @@ S3ClientManager::S3ClientManager(const std::string& region, TokenFetcher fetcher
       refresh_margin_(refresh_margin) {}
 
 bool S3ClientManager::need_refresh(const std::string& patient_id) {
-    auto now = std::time(nullptr);
-    if (patient_id != current_patient_id_) return true;
-    if (!current_client_) return true;
-    if (now > current_credential_.expiration - refresh_margin_) return true;
+    const auto current_time = std::time(nullptr);
+    
+    // Refresh if patient ID changed
+    if (patient_id != current_patient_id_) {
+        return true;
+    }
+    
+    // Refresh if no client exists
+    if (!current_client_) {
+        return true;
+    }
+    
+    // Refresh if credentials are expiring soon (within refresh_margin_ seconds)
+    if (current_time > current_credential_.expiration - refresh_margin_) {
+        return true;
+    }
+    
     return false;
 }
 
 std::shared_ptr<Aws::S3::S3Client> S3ClientManager::get_client(const std::string& patient_id) {
+    // Thread-safe access using mutex lock
     std::lock_guard<std::mutex> lock(mutex_);
+    
     if (need_refresh(patient_id)) {
         return refresh_client(patient_id);
     }
+    
     return current_client_;
 }
 
@@ -43,54 +59,66 @@ std::shared_ptr<RefreshingS3Client> S3ClientManager::get_refreshing_client(const
 }
 
 std::shared_ptr<Aws::S3::S3Client> S3ClientManager::refresh_client(const std::string& patient_id) {
-    AWS_LOGSTREAM_INFO("S3ClientManager", "refresh_client patient_id: " << patient_id);
-    json cred_json = token_fetcher_(patient_id);
-    AWS_LOGSTREAM_INFO("S3ClientManager", "refresh_client cred_json: " << cred_json);
-    S3Credential cred = S3Credential::from_json(cred_json);
+    AWS_LOGSTREAM_INFO("S3ClientManager", "Refreshing client for patient_id: " << patient_id);
+    
+    // Fetch credentials from token fetcher
+    json credential_json = token_fetcher_(patient_id);
+    AWS_LOGSTREAM_INFO("S3ClientManager", "Fetched credentials JSON: " << credential_json);
+    
+    // Parse credentials from JSON
+    S3Credential credential = S3Credential::from_json(credential_json);
 
-    // Configure client with timeout settings and disable IMDS
-    // Use ClientConfiguration instead of S3ClientConfiguration to avoid linker symbol conflicts
+    // Configure S3 client with timeout settings and disable IMDS
+    // Using ClientConfiguration instead of S3ClientConfiguration to avoid linker symbol conflicts
     AWS_LOGSTREAM_INFO("S3ClientManager", "Creating S3 client configuration...");
-    Aws::Client::ClientConfiguration clientConfig;
-    clientConfig.region = region_;
-    // 30 seconds request timeout, 10 seconds connect timeout
-    clientConfig.requestTimeoutMs = 30000;
-    clientConfig.connectTimeoutMs = 10000;
-    // Disable EC2 metadata service to avoid timeout errors
-    clientConfig.disableIMDS = true;
+    Aws::Client::ClientConfiguration client_config;
+    client_config.region = region_;
+    // Set timeouts: 30 seconds for request timeout, 10 seconds for connect timeout
+    client_config.requestTimeoutMs = 30000;
+    client_config.connectTimeoutMs = 10000;
+    // Disable EC2 Instance Metadata Service (IMDS) to avoid timeout errors
+    client_config.disableIMDS = true;
 
-    // Create AWS credentials (with Session Token) - reuse logic from createS3Client
+    // Create AWS credentials with optional session token
     AWS_LOGSTREAM_INFO("S3ClientManager", "Creating AWS credentials...");
-    Aws::Auth::AWSCredentials credentials;
-    if (!cred.sessionToken.empty()) {
-        // Use temporary credentials (STS)
+    Aws::Auth::AWSCredentials aws_credentials;
+    if (!credential.sessionToken.empty()) {
+        // Use temporary credentials (from AWS STS - Security Token Service)
         AWS_LOGSTREAM_INFO("S3ClientManager", "Using temporary credentials with session token");
-        credentials = Aws::Auth::AWSCredentials(cred.accessKeyId, cred.secretAccessKey, cred.sessionToken);
+        aws_credentials = Aws::Auth::AWSCredentials(
+            credential.accessKeyId, 
+            credential.secretAccessKey, 
+            credential.sessionToken);
     } else {
-        // Use permanent credentials
+        // Use permanent credentials (access key and secret key only)
         AWS_LOGSTREAM_INFO("S3ClientManager", "Using permanent credentials");
-        credentials = Aws::Auth::AWSCredentials(cred.accessKeyId, cred.secretAccessKey);
+        aws_credentials = Aws::Auth::AWSCredentials(
+            credential.accessKeyId, 
+            credential.secretAccessKey);
     }
 
-    // Create credentials provider
+    // Create credentials provider wrapper
     AWS_LOGSTREAM_INFO("S3ClientManager", "Creating credentials provider...");
-    auto credentialsProvider = Aws::MakeShared<Aws::Auth::SimpleAWSCredentialsProvider>(
-        "S3ClientManager", credentials);
+    auto credentials_provider = Aws::MakeShared<Aws::Auth::SimpleAWSCredentialsProvider>(
+        "S3ClientManager", aws_credentials);
 
-    // Create S3 client with shared_ptr
+    // Create S3 client with shared_ptr ownership
+    // PayloadSigningPolicy::Never means we don't sign the request payload (suitable for streaming uploads)
     AWS_LOGSTREAM_INFO("S3ClientManager", "Creating S3 client...");
-    auto client = std::make_shared<Aws::S3::S3Client>(
-        credentialsProvider, clientConfig,
-        Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, true);
+    auto s3_client = std::make_shared<Aws::S3::S3Client>(
+        credentials_provider, 
+        client_config,
+        Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, 
+        true);
 
+    // Update cached values
     current_patient_id_ = patient_id;
-    current_client_ = client;
-    current_credential_ = cred;
+    current_client_ = s3_client;
+    current_credential_ = credential;
 
-    std::cout << "[S3ClientManager] Refreshed client for patient_id: " << patient_id << std::endl;
-    AWS_LOGSTREAM_INFO("S3ClientManager", "Refreshed client for patient_id: " << patient_id);
+    AWS_LOGSTREAM_INFO("S3ClientManager", "Successfully refreshed client for patient_id: " << patient_id);
 
-    return client;
+    return s3_client;
 }
 
 

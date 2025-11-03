@@ -31,13 +31,6 @@ json HippoClient::ConfirmUploadRawFile(const json& rawDeviceData) {
     return response;
 }
 
-json HippoClient::GenerateUniqueDataId(int quantity) {
-    if (quantity <= 0) throw std::invalid_argument("quantity must be > 0");
-
-    std::string url = base_url_ + "/hippo/thirdParty/file/generateUniqueKey/" + std::to_string(quantity);
-    return RequestWithToken("GET", url);
-}
-
 json HippoClient::GetS3Credentials(const std::string& patientId) {
     std::string url = base_url_ + "/hippo/thirdParty/file/getS3Credentials";
     json payload = {
@@ -46,9 +39,9 @@ json HippoClient::GetS3Credentials(const std::string& patientId) {
         {"resourceType", 2}
     };
 
-    json resp = RequestWithToken("POST", url, payload);
-    std::cout << "[get_s3_credentials] response:\n" << resp << std::endl;
-    return resp;
+    json response = RequestWithToken("POST", url, payload);
+    std::cout << "[get_s3_credentials] response:\n" << response << std::endl;
+    return response;
 }
 
 // Private methods
@@ -59,14 +52,19 @@ void HippoClient::Login() {
         {"password", password_}
     };
 
-    json resp = HttpRequest("POST", url, payload);
+    json response = HttpRequest("POST", url, payload);
 
-    if (!resp.contains("jwtToken")) {
+    if (!response.contains("jwtToken")) {
         throw std::runtime_error("Login failed: missing jwtToken in response");
     }
 
-    jwt_token_ = resp["jwtToken"];
-    hospital_id_ = resp["userInfo"]["hospitalId"].get<std::string>();
+    jwt_token_ = response["jwtToken"];
+    
+    // Extract hospital ID from user info
+    if (!response.contains("userInfo") || !response["userInfo"].contains("hospitalId")) {
+        throw std::runtime_error("Login failed: missing hospitalId in response");
+    }
+    hospital_id_ = response["userInfo"]["hospitalId"].get<std::string>();
 
     std::cout << "[HippoClient] Login success, jwt_token=" << jwt_token_
               << ", hospital_id=" << hospital_id_ << std::endl;
@@ -82,17 +80,22 @@ bool HippoClient::LoginWithRetries(int maxLoginRetries) {
     int attempt = 0;
     while (attempt < maxLoginRetries) {
         try {
-            Login(); // original login() method
-            return true; // login success
-        } catch (const std::exception& e) {
+            Login(); // Attempt login
+            return true; // Login successful
+        } catch (const std::exception& error) {
             std::cerr << "[HippoClient] Login attempt " << (attempt + 1)
-                      << " failed: " << e.what() << std::endl;
+                      << " failed: " << error.what() << std::endl;
             attempt++;
-            int sleep_time = 1 << attempt; // exponential backoff
-            std::this_thread::sleep_for(std::chrono::seconds(sleep_time));
+            
+            // Exponential backoff: 2^attempt seconds (2s, 4s, 8s, ...)
+            int sleep_time = 1 << attempt;
+            if (attempt < maxLoginRetries) {
+                std::cerr << "[HippoClient] Retrying login after " << sleep_time << "s..." << std::endl;
+                std::this_thread::sleep_for(std::chrono::seconds(sleep_time));
+            }
         }
     }
-    return false; // login completely failed
+    return false; // All login attempts failed
 }
 
 // General request wrapper
@@ -104,131 +107,150 @@ json HippoClient::RequestWithToken(const std::string& method,
     while (attempt < maxRetries) {
         try {
             std::string token = GetToken();
-            std::cout << "[HippoClient] Requesting token: " << token << std::endl;
+            std::cout << "[HippoClient] Making request to: " << url << std::endl;
             json response = HttpRequest(method, url, payload, token);
             return response;
-        } catch (const std::exception& e) {
-            std::cout << "[HippoClient] Request failed: " << e.what() << std::endl;
-            std::string msg = e.what();
+        } catch (const std::exception& error) {
+            std::string error_message = error.what();
             std::cerr << "[HippoClient] Request failed (attempt " << (attempt + 1)
-                      << ") for URL=" << url << ": " << msg << std::endl;
+                      << ") for URL=" << url << ": " << error_message << std::endl;
 
-            if (msg.find("401") != std::string::npos) {
-                std::cerr << "[HippoClient] Token expired, re-login..." << std::endl;
+            // Check if error is due to expired/invalid token (401 Unauthorized)
+            if (error_message.find("401") != std::string::npos) {
+                std::cerr << "[HippoClient] Token expired, attempting re-login..." << std::endl;
                 jwt_token_.clear();
                 if (!LoginWithRetries()) {
                     throw std::runtime_error("Login failed after retries, cannot refresh token");
                 }
+                // Continue to retry the request with new token (don't increment attempt)
                 continue;
             }
 
+            // For other errors, retry with exponential backoff
             attempt++;
-            if (attempt >= maxRetries) throw;
+            if (attempt >= maxRetries) {
+                throw; // Re-throw the last exception
+            }
+            
+            // Exponential backoff: 2^attempt seconds
             int sleep_time = 1 << attempt;
             std::cerr << "[HippoClient] Retrying after " << sleep_time << "s..." << std::endl;
             std::this_thread::sleep_for(std::chrono::seconds(sleep_time));
         }
     }
-    throw std::runtime_error("Request failed after retries for URL=" + url);
+    throw std::runtime_error("Request failed after " + std::to_string(maxRetries) + " retries for URL=" + url);
 }
 
-// libcurl callback function: used to receive HTTP response body content
-static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+/**
+ * libcurl callback function to receive HTTP response body content.
+ * This callback is invoked by libcurl for each chunk of response data received.
+ * @param contents Pointer to the received data chunk
+ * @param size Size of each data element
+ * @param nmemb Number of data elements
+ * @param user_pointer Pointer to user-provided data (std::string* in our case)
+ * @return Total number of bytes processed (must equal size * nmemb)
+ */
+static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* user_pointer) {
     size_t total_size = size * nmemb;
-    std::string* response = static_cast<std::string*>(userp);
-    response->append(static_cast<char*>(contents), total_size);
+    std::string* response_buffer = static_cast<std::string*>(user_pointer);
+    response_buffer->append(static_cast<char*>(contents), total_size);
     return total_size;
 }
 
 /**
- * @brief Unified HTTP request function (supports GET/POST/PUT/DELETE)
- *
+ * Unified HTTP request function (supports GET/POST/PUT/DELETE).
+ * Performs HTTP request using libcurl with SSL verification, timeout handling,
+ * and automatic JSON parsing. Returns the "data" field if present, otherwise
+ * returns the full JSON response.
  * @param method  HTTP method, e.g., "GET", "POST", "PUT", "DELETE"
- * @param url     Request URL
- * @param payload JSON payload (only valid for POST/PUT)
- * @param token   Token (optional)
- * @return json   Parsed JSON data (if contains "data", returns data field)
+ * @param url     Full request URL
+ * @param payload JSON payload (only used for POST/PUT requests)
+ * @param token   Authorization token (optional, format: "Bearer <token>")
+ * @return json   Parsed JSON response (returns "data" field if present, otherwise full response)
  */
 json HippoClient::HttpRequest(const std::string& method,
                               const std::string& url,
                               const json& payload,
                               const std::string& token) {
     // 1. Initialize CURL handle
-    CURL* curl = curl_easy_init();
-    if (!curl) throw std::runtime_error("Failed to init curl");
+    CURL* curl_handle = curl_easy_init();
+    if (!curl_handle) {
+        throw std::runtime_error("Failed to initialize curl handle");
+    }
 
-    std::string response_string;         // stores server response
+    std::string response_string;         // Buffer to store server response
     struct curl_slist* headers = nullptr; // HTTP header list
-    std::string payload_str;             // pre-declare payload string to ensure scope
+    std::string payload_string;           // Serialized JSON payload (ensures scope)
 
-    // 2. Construct HTTP Header
+    // 2. Construct HTTP headers
     headers = curl_slist_append(headers, "Content-Type: application/json; charset=utf-8");
     headers = curl_slist_append(headers, "Accept: application/json");
 
-    // 3. Add Authorization header if token exists
+    // 3. Add Authorization header if token is provided
     if (!token.empty()) {
-        headers = curl_slist_append(headers, ("Authorization: " + token).c_str());
+        std::string auth_header = "Authorization: " + token;
+        headers = curl_slist_append(headers, auth_header.c_str());
     }
 
-    // 4. Basic configuration: URL, request method, callback function, headers, etc.
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str());   // supports GET/POST/PUT/DELETE
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);             // set HTTP headers
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);    // response callback
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_string);     // write response to string
+    // 4. Configure CURL options: URL, method, headers, and response handling
+    curl_easy_setopt(curl_handle, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl_handle, CURLOPT_CUSTOMREQUEST, method.c_str());   // Supports GET/POST/PUT/DELETE
+    curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);             // Set HTTP headers
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, WriteCallback);    // Response data callback
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, &response_string);     // Write response to buffer
 
-    // 5. Security settings: enable HTTPS certificate verification (must enable in production)
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L); // verify SSL certificate
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L); // verify hostname matches certificate
+    // 5. Security settings: enable HTTPS certificate verification (required in production)
+    curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYPEER, 1L); // Verify SSL certificate
+    curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYHOST, 2L); // Verify hostname matches certificate
 
     // 6. Timeout settings (prevent long blocking)
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);        // total timeout 30s
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L); // connection timeout 10s
+    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 30L);        // Total request timeout: 30 seconds
+    curl_easy_setopt(curl_handle, CURLOPT_CONNECTTIMEOUT, 10L); // Connection timeout: 10 seconds
 
-    // 7. If POST or PUT, serialize payload and attach to request body
+    // 7. For POST/PUT requests, serialize JSON payload and attach to request body
     if (method == "POST" || method == "PUT") {
-        payload_str = payload.dump();
-        std::cout << "[DEBUG] Sending JSON: " << payload_str << std::endl;
+        payload_string = payload.dump();
+        std::cout << "[DEBUG] Sending JSON payload: " << payload_string << std::endl;
 
-        // Use COPYPOSTFIELDS to ensure libcurl copies data internally, avoiding dangling pointer
-        curl_easy_setopt(curl, CURLOPT_COPYPOSTFIELDS, payload_str.c_str());
+        // Use COPYPOSTFIELDS to ensure libcurl copies data internally, avoiding dangling pointer issues
+        curl_easy_setopt(curl_handle, CURLOPT_COPYPOSTFIELDS, payload_string.c_str());
     }
 
-    // 8. Execute request
-    CURLcode res = curl_easy_perform(curl);
+    // 8. Execute HTTP request
+    CURLcode curl_result = curl_easy_perform(curl_handle);
 
-    // 9. Get HTTP status code
-    long response_code = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+    // 9. Retrieve HTTP status code from response
+    long http_status_code = 0;
+    curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &http_status_code);
 
-    // 10. Free resources (first free headers, then cleanup)
+    // 10. Free CURL resources (headers must be freed before cleanup)
     curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
+    curl_easy_cleanup(curl_handle);
 
-    // 11. Check if CURL executed successfully
-    if (res != CURLE_OK) {
-        throw std::runtime_error(std::string("CURL failed: ") + curl_easy_strerror(res));
+    // 11. Check if CURL execution was successful
+    if (curl_result != CURLE_OK) {
+        throw std::runtime_error(std::string("CURL request failed: ") + curl_easy_strerror(curl_result));
     }
 
-    // 12. Parse response JSON
-    json result_json;
+    // 12. Parse response as JSON
+    json response_json;
     try {
-        result_json = json::parse(response_string);
-    } catch (const std::exception& e) {
-        // If not valid JSON, throw detailed error (include raw response)
-        throw std::runtime_error(std::string("Invalid JSON response: ") + e.what() +
+        response_json = json::parse(response_string);
+    } catch (const std::exception& parse_error) {
+        // If JSON parsing fails, include raw response in error message for debugging
+        throw std::runtime_error(std::string("Invalid JSON response: ") + parse_error.what() +
                                  "\nRaw response: " + response_string);
     }
 
-    // 13. Check HTTP status code for errors
-    if (response_code == 401) {
-        throw std::runtime_error("401 Unauthorized");
+    // 13. Check HTTP status code and handle errors
+    if (http_status_code == 401) {
+        throw std::runtime_error("401 Unauthorized - Authentication token is invalid or expired");
     }
-    if (response_code != 200) {
-        throw std::runtime_error("HTTP error: " + std::to_string(response_code) +
-                                 " - " + response_string);
+    if (http_status_code != 200) {
+        throw std::runtime_error("HTTP error " + std::to_string(http_status_code) +
+                                 " - Response: " + response_string);
     }
 
-    // 14. If JSON contains "data" field, return data, otherwise return full JSON
-    return result_json.contains("data") ? result_json["data"] : result_json;
+    // 14. Return "data" field if present (API convention), otherwise return full JSON response
+    return response_json.contains("data") ? response_json["data"] : response_json;
 }
