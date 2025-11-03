@@ -24,8 +24,6 @@ Private Const S3_REGION As String = "us-west-1"
 
 ' Main function to handle file upload workflow with HippoClinic API
 Sub Main()
-    Dim jwtToken As String
-    Dim hospitalId As String
     Dim patientId As String
     Dim dataId As String
     Dim uploadFilePath As String
@@ -63,20 +61,14 @@ Sub Main()
         Exit Sub
     End If
     
-    ' 2. Login and get authentication token
-    If Not LoginAndGetToken(jwtToken, hospitalId) Then
-        Debug.Print "ERROR: Login failed"
-        Exit Sub
-    End If
-    
-    ' 3. Create patient record
-    If Not CreatePatient(jwtToken, hospitalId, patientId) Then
+    ' 2. Create patient record (token managed internally)
+    If Not CreatePatient(patientId) Then
         Debug.Print "ERROR: Failed to create patient"
         Exit Sub
     End If
     
-    ' 4. Generate unique data ID
-    If Not GenerateDataId(jwtToken, dataId) Then
+    ' 3. Generate unique data ID (token managed internally)
+    If Not GenerateDataId(dataId) Then
         Debug.Print "ERROR: Failed to generate data ID"
         Exit Sub
     End If
