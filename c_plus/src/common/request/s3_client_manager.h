@@ -89,6 +89,18 @@ public:
      */
     std::shared_ptr<Aws::S3::S3Client> get_client();
 
+    /**
+     * Execute an S3 operation with auto refresh and one retry on expired credentials.
+     * The callable should accept a shared_ptr<Aws::S3::S3Client> and return an AWS Outcome type
+     * that provides IsSuccess() and GetError().
+     * @tparam Func Callable type
+     * @param func  Callable receiving shared_ptr<S3Client> and returning Outcome
+     * @return Outcome returned by the callable (possibly from the retry)
+     */
+    template <typename Func>
+    auto with_auto_refresh(Func&& func)
+        -> decltype(std::forward<Func>(func)(std::declval<std::shared_ptr<Aws::S3::S3Client>>()));
+
 private:
     std::weak_ptr<S3ClientManager> manager_;    ///< Weak pointer to the S3ClientManager to avoid circular reference
     std::string patient_id_;                    ///< Patient ID for credential fetching
@@ -132,6 +144,12 @@ public:
      */
     std::shared_ptr<RefreshingS3Client> get_refreshing_client(const std::string& patient_id);
 
+    /**
+     * Force refresh the S3 client for a patient id regardless of current cached state.
+     * Thread-safe.
+     */
+    std::shared_ptr<Aws::S3::S3Client> force_refresh(const std::string& patient_id);
+
 private:
     /**
      * Checks if the S3 client needs to be refreshed.
@@ -159,3 +177,45 @@ private:
 
     std::mutex mutex_;  ///< Mutex for thread-safe access
 };
+
+// ---- Template implementation ----
+template <typename Func>
+auto RefreshingS3Client::with_auto_refresh(Func&& func)
+    -> decltype(std::forward<Func>(func)(std::declval<std::shared_ptr<Aws::S3::S3Client>>())) {
+    auto manager = manager_.lock();
+    if (!manager) {
+        throw std::runtime_error("S3ClientManager has been destroyed");
+    }
+
+    // Retry indefinitely for expired-credential errors; do not retry for other errors
+    int attempt = 0;
+    std::shared_ptr<Aws::S3::S3Client> client;
+
+    while (true) {
+        if (attempt == 0) {
+            client = manager->get_client(patient_id_);
+        }
+        auto outcome = std::forward<Func>(func)(client);
+
+        if (outcome.IsSuccess()) {
+            return outcome;
+        }
+
+        const auto& error = outcome.GetError();
+        const std::string exception_name = error.GetExceptionName().c_str();
+        const std::string message = error.GetMessage().c_str();
+        const bool is_expired =
+            (exception_name.find("ExpiredToken") != std::string::npos) ||
+            (exception_name.find("RequestExpired") != std::string::npos) ||
+            (message.find("ExpiredToken") != std::string::npos) ||
+            (message.find("RequestExpired") != std::string::npos);
+
+        if (!is_expired) {
+            return outcome;
+        }
+
+        AWS_LOGSTREAM_INFO("RefreshingS3Client", "Detected expired credentials, refreshing and retrying (attempt " << (attempt + 1) << ") for patient_id=" << patient_id_);
+        client = manager->force_refresh(patient_id_);
+        ++attempt;
+    }
+}

@@ -154,4 +154,9 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientManager::refresh_client(const std::st
     return s3_client;
 }
 
+std::shared_ptr<Aws::S3::S3Client> S3ClientManager::force_refresh(const std::string& patient_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return refresh_client(patient_id);
+}
+
 
