@@ -197,10 +197,6 @@ bool ConfirmUploadRawFile(const String& dataId,
         if (hasSuccessUploads && !hasFailedUploads) {
             AWS_LOGSTREAM_INFO("S3Upload", "Upload confirmation successful for dataId: " << dataId 
                               << " - Success uploads: " << response["successUploads"].size());
-            
-            // Automatically cleanup uploads after successful confirmation
-            CleanupUploadsByDataId(dataId);
-            
             return true;
         } else if (hasFailedUploads) {
             AWS_LOGSTREAM_ERROR("S3Upload", "Upload confirmation failed for dataId: " << dataId 

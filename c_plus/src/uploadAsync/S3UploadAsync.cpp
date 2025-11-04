@@ -267,6 +267,10 @@ void asyncUploadWorker(const String& uploadId,
                         }
                     }
                     AWS_LOGSTREAM_INFO("S3Upload", "Backend confirmation SUCCESS for dataId: " << progress->dataId);
+                    
+                    // Cleanup uploads after status has been updated to CONFIRM_SUCCESS
+                    // This ensures VB6 can query the final success status before cleanup
+                    CleanupUploadsByDataId(progress->dataId);
                 } else {
                     // Update all uploads to CONFIRM_FAILED
                     for (auto& upload : allUploads) {
