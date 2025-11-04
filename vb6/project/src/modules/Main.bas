@@ -19,7 +19,7 @@ Private Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
 ' S3 configuration constants
 ' For prod running, do not change it here. In our current prod settings,
 ' the prod bucket is called "hippoclinic-staging". We will change it later.
-Private Const S3_BUCKET As String = "hippoclinic"
+Private Const S3_BUCKET As String = "hippoclinic-staging"
 Private Const S3_REGION As String = "us-west-1"
 
 ' Main function to handle file upload workflow with HippoClinic API
@@ -74,7 +74,7 @@ Sub Main()
     End If
     
     ' 5. Set credentials and initialize AWS SDK
-    sdkInitResult = SetCredential(LOGIN_ACCOUNT, LOGIN_ACCOUNT_PASSWORD)
+    sdkInitResult = SetCredential(ENV_URL, LOGIN_ACCOUNT, LOGIN_ACCOUNT_PASSWORD)
 
     Dim jsonResponse As Object
     Set jsonResponse = JsonConverter.ParseJson(sdkInitResult)

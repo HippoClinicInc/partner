@@ -5,7 +5,7 @@ bool g_isInitialized = false;
 Aws::SDKOptions g_options;
 
 // HippoClient credentials
-String g_apiUrl = "https://dev.hippoclinic.com";
+String g_apiUrl = "";
 String g_email = "";
 String g_password = "";
 
@@ -89,7 +89,7 @@ const char* InitializeAwsSDK() {
 
     try {
         // Set log level (can be adjusted as needed)
-        g_options.loggingOptions.logLevel = Aws::Utils::Logging::LogLevel::Info;
+        g_options.loggingOptions.logLevel = Aws::Utils::Logging::LogLevel::Warn;
 
         // Initialize AWS SDK
         Aws::InitAPI(g_options);
@@ -128,7 +128,7 @@ extern "C" S3UPLOAD_API long __stdcall GetS3FileSize(const char* filePath) {
 }
 
 // Set credentials
-extern "C" S3UPLOAD_API const char* __stdcall SetCredential(const char* userName, const char* password) {
+extern "C" S3UPLOAD_API const char* __stdcall SetCredential(const char* hippoApiUrl, const char* userName, const char* password) {
     // Call InitializeAwsSDK first
     const char* initResult = InitializeAwsSDK();
     
@@ -142,6 +142,7 @@ extern "C" S3UPLOAD_API const char* __stdcall SetCredential(const char* userName
         }
         
         // SDK initialized successfully, now set up HippoClient credentials
+        g_apiUrl = hippoApiUrl;
         g_email = userName;
         g_password = password;
         

@@ -13,6 +13,7 @@ Option Explicit
 ' The code is corresponds to the error code constants above
 ' { "code": 0, "message": "success" }
 Declare Function SetCredential Lib "S3UploadLib.dll" ( _
+    ByVal hippoApiUrl As String, _
     ByVal userName As String, _
     ByVal password As String _
 ) As String
