@@ -1,6 +1,22 @@
 Attribute VB_Name = "Module1"
 Option Explicit
 
+' NOTE: Keep this enum in sync with C++ enum UploadStatus in `c_plus/src/common/S3Common.h`.
+' If you change values or add/remove states on one side, you MUST update the other side.
+' This enum is used for both the top-level "code" field and the detailed "status" field
+' returned from the C++ DLL APIs.
+Public Enum UploadStatus
+    UPLOAD_PENDING = 0        ' Upload is waiting to start
+    UPLOAD_UPLOADING = 1      ' Upload is currently in progress
+    UPLOAD_SUCCESS = 2        ' Upload completed successfully (also used as success code)
+    UPLOAD_FAILED = 3         ' Upload failed with error (also used as failure code)
+    UPLOAD_CANCELLED = 4      ' Upload was cancelled by user
+    SDK_INIT_SUCCESS = 5      ' SDK resources were successfully initialized
+    SDK_CLEAN_SUCCESS = 6     ' SDK resources were successfully cleaned up
+    CONFIRM_SUCCESS = 7       ' Backend confirmation completed successfully
+    CONFIRM_FAILED = 8        ' Upload successful but backend confirmation failed
+End Enum
+
 ' Required references:
 ' Project -> References -> Add the following libraries
 ' - Microsoft WinHTTP Services 5.1
@@ -79,7 +95,7 @@ Sub Main()
     Dim jsonResponse As Object
     Set jsonResponse = JsonConverter.ParseJson(sdkInitResult)
 
-    If jsonResponse("code") <> 5 Then
+    If jsonResponse("code") <> SDK_INIT_SUCCESS Then
         Debug.Print "ERROR: AWS SDK initialization failed - code: " & sdkInitResult
         Exit Sub
     End If
@@ -246,7 +262,7 @@ Private Function UploadSingleFile(ByVal filePath As String, ByVal s3FileKey As S
     Dim startCode As Long
     startCode = startObj("code")
 
-    If startCode <> 2 Then
+    If startCode <> UPLOAD_SUCCESS Then
         Debug.Print "ERROR: Failed to start async upload - " & startObj("message")
         UploadSingleFile = False
         Exit Function
@@ -318,26 +334,26 @@ ParseResponse:
 
         statusCode = statusObj("code")
 
-        If statusCode = 2 Then
+        If statusCode = UPLOAD_SUCCESS Then
             ' Parse the status from the message field (which contains JSON string)
             uploadStatus = statusObj("status")
             hasSeenValidStatus = True ' Mark that we've seen a valid status
 
-            If uploadStatus = 7 Then ' CONFIRM_SUCCESS - Upload and confirmation completed
+            If uploadStatus = CONFIRM_SUCCESS Then ' Upload and confirmation completed
                 isCompleted = True
                 Exit Do
-            ElseIf uploadStatus = 8 Then ' CONFIRM_FAILED - Upload successful but confirmation failed
+            ElseIf uploadStatus = CONFIRM_FAILED Then ' Upload successful but confirmation failed
                 Debug.Print "WARNING: Upload completed but confirmation failed"
                 isCompleted = True ' Still consider it completed since file was uploaded
                 Exit Do
-            ElseIf uploadStatus = 2 Then ' UPLOAD_SUCCESS - Upload completed, confirmation in progress
+            ElseIf uploadStatus = UPLOAD_SUCCESS Then ' Upload completed, confirmation in progress
                 ' Continue waiting for confirmation to complete
-            ElseIf uploadStatus = 3 Then ' UPLOAD_FAILED
+            ElseIf uploadStatus = UPLOAD_FAILED Then ' Upload failed
                 isError = True
                 Debug.Print "ERROR: Upload failed - " & statusObj("errorMessage")
                 Exit Do
             End If
-        ElseIf statusCode = 3 Then
+        ElseIf statusCode = UPLOAD_FAILED Then
             ' Task has been cleaned up (usually means upload completed successfully)
             If hasSeenValidStatus Then
                 ' If we've seen valid status before, this likely means upload succeeded and was cleaned up

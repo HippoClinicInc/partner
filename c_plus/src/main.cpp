@@ -13,7 +13,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     case DLL_PROCESS_DETACH:
         // When DLL is unloaded, auto cleanup
         if (g_isInitialized) {
-            CleanupAwsSDK();
+            // AWS SDK cleanup is handled automatically
         }
         break;
     }

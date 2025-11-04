@@ -1,7 +1,5 @@
 EXPORTS
-InitializeAwsSDK
-CleanupAwsSDK
+SetCredential
 UploadFileSync
 UploadFileAsync
 GetAsyncUploadStatusBytes
-CleanupUploadsByDataId

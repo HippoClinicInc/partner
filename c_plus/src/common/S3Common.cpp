@@ -4,6 +4,11 @@
 bool g_isInitialized = false;
 Aws::SDKOptions g_options;
 
+// HippoClient credentials
+String g_apiUrl = "";
+String g_email = "";
+String g_password = "";
+
 String create_response(int code, const String& message) {
     std::ostringstream oss;
     oss << "{"
@@ -26,10 +31,59 @@ String getUploadId(const String& dataId, long long timestamp) {
     return dataId + UPLOAD_ID_SEPARATOR + std::to_string(timestamp);
 }
 
+// Extract uploadDataName from S3 objectKey
+// objectKey format: "patient/patientId/source_data/dataId/uploadDataName/" or 
+//                   "patient/patientId/source_data/dataId/uploadDataName/filename"
+// Returns the uploadDataName extracted from the path
+String extractUploadDataName(const String& objectKey) {
+    String uploadDataName = "";
+    
+    // Find the last slash
+    size_t lastSlash = objectKey.find_last_of('/');
+    if (lastSlash != String::npos) {
+        // Get the path without the last segment
+        String pathWithoutLastSegment = objectKey.substr(0, lastSlash);
+        
+        // Find the second-to-last slash
+        size_t secondLastSlash = pathWithoutLastSegment.find_last_of('/');
+        if (secondLastSlash != String::npos) {
+            // Extract uploadDataName (between second-to-last and last slash)
+            uploadDataName = pathWithoutLastSegment.substr(secondLastSlash + 1);
+        }
+    }
+    
+    return uploadDataName;
+}
+
+// AsyncUploadManager::addUpload implementation
+String AsyncUploadManager::addUpload(const String& uploadId, const String& localFilePath, const String& s3ObjectKey, const String& patientId) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto progress = std::make_shared<AsyncUploadProgress>();
+    progress->uploadId = uploadId;
+    progress->localFilePath = localFilePath;
+    progress->s3ObjectKey = s3ObjectKey;
+    progress->patientId = patientId;
+    
+    // Extract dataId from uploadId (format: "dataId_timestamp")
+    size_t separatorPos = uploadId.find(UPLOAD_ID_SEPARATOR);
+    if (separatorPos != String::npos) {
+        progress->dataId = uploadId.substr(0, separatorPos);
+    }
+    
+    // Extract uploadDataName from s3ObjectKey
+    progress->uploadDataName = extractUploadDataName(s3ObjectKey);
+    
+    progress->status = UPLOAD_PENDING;  // Set to pending initially
+    uploads_[uploadId] = progress;
+    return uploadId;
+}
+
 // Initialize AWS SDK
-extern "C" S3UPLOAD_API const char* __stdcall InitializeAwsSDK() {
+const char* InitializeAwsSDK() {
+    // If SDK is already initialized, return success status
+    // This allows multiple calls to SetCredential without errors
     if (g_isInitialized) {
-        static std::string response = create_response(UPLOAD_FAILED, formatErrorMessage("AWS SDK already initialized"));
+        static std::string response = create_response(SDK_INIT_SUCCESS, "AWS SDK already initialized");
         return response.c_str();
     }
 
@@ -54,25 +108,6 @@ extern "C" S3UPLOAD_API const char* __stdcall InitializeAwsSDK() {
     }
 }
 
-// Cleanup AWS SDK
-extern "C" S3UPLOAD_API const char* __stdcall CleanupAwsSDK() {
-    if (g_isInitialized) {
-        try {
-            Aws::ShutdownAPI(g_options);
-            g_isInitialized = false;
-            static std::string successResponse = create_response(SDK_CLEAN_SUCCESS, "AWS SDK cleaned up successfully");
-            return successResponse.c_str();
-        }
-        catch (...) {
-            static std::string unknownError = create_response(UPLOAD_FAILED, formatErrorMessage("Error during AWS SDK cleanup"));
-            return unknownError.c_str();
-        }
-    } else {
-        static std::string notInitialized = create_response(UPLOAD_FAILED, formatErrorMessage(ErrorMessage::SDK_NOT_INITIALIZED));
-        return notInitialized.c_str();
-    }
-}
-
 // Check if file exists
 extern "C" S3UPLOAD_API int __stdcall FileExists(const char* filePath) {
     if (!filePath) return 0;
@@ -90,6 +125,96 @@ extern "C" S3UPLOAD_API long __stdcall GetS3FileSize(const char* filePath) {
         return -1;
     }
     return static_cast<long>(file.tellg());
+}
+
+// Set credentials
+extern "C" S3UPLOAD_API const char* __stdcall SetCredential(const char* hippoApiUrl, const char* userName, const char* password) {
+    // Call InitializeAwsSDK first
+    const char* initResult = InitializeAwsSDK();
+    
+    // Check if SDK initialization was successful
+    try {
+        // Parse the initialization result to check if it was successful
+        String initResultStr = initResult;
+        if (initResultStr.find("\"code\":5") == String::npos) {
+            // SDK initialization failed, return the error
+            return initResult;
+        }
+        
+        // SDK initialized successfully, now set up HippoClient credentials
+        g_apiUrl = hippoApiUrl;
+        g_email = userName;
+        g_password = password;
+        
+        // Initialize HippoClient with credentials
+        HippoClient::Init(g_apiUrl, g_email, g_password);
+        
+        // Log the credential setup
+        AWS_LOGSTREAM_INFO("S3Upload", "Credentials set - URL: " << g_apiUrl << ", Email: " << g_email);
+        
+        // Return success response
+        static std::string response = create_response(SDK_INIT_SUCCESS, "AWS SDK initialized and credentials set successfully");
+        return response.c_str();
+        
+    } catch (const std::exception& e) {
+        static std::string response = create_response(UPLOAD_FAILED, formatErrorMessage("Failed to set credentials", e.what()));
+        return response.c_str();
+    } catch (...) {
+        static std::string response = create_response(UPLOAD_FAILED, formatErrorMessage("Failed to set credentials", ErrorMessage::UNKNOWN_ERROR));
+        return response.c_str();
+    }
+}
+
+// Backend API confirmation function
+bool ConfirmUploadRawFile(const String& dataId, 
+                         const String& uploadDataName, const String& patientId, 
+                         long long uploadFileSizeBytes, const String& s3ObjectKey) {
+    try {
+        // Build JSON payload for HippoClient
+        nlohmann::json payload;
+        payload["dataId"] = dataId;
+        payload["dataName"] = uploadDataName;
+        payload["fileName"] = s3ObjectKey;
+        payload["dataSize"] = uploadFileSizeBytes;
+        payload["patientId"] = patientId;
+        payload["dataType"] = 20;
+        payload["uploadDataName"] = uploadDataName;
+        payload["isRawDataInternal"] = 1;
+        payload["dataVersions"] = nlohmann::json::array({0});
+        
+        // Use HippoClient to confirm upload
+        nlohmann::json response = HippoClient::ConfirmUploadRawFile(payload);
+        
+        // Check if confirmation was successful by examining response
+        bool hasSuccessUploads = response.contains("successUploads") && 
+                                response["successUploads"].is_array() && 
+                                response["successUploads"].size() > 0;
+        
+        bool hasFailedUploads = response.contains("failedUploads") && 
+                               response["failedUploads"].is_array() && 
+                               response["failedUploads"].size() > 0;
+        
+        if (hasSuccessUploads && !hasFailedUploads) {
+            AWS_LOGSTREAM_INFO("S3Upload", "Upload confirmation successful for dataId: " << dataId 
+                              << " - Success uploads: " << response["successUploads"].size());
+            return true;
+        } else if (hasFailedUploads) {
+            AWS_LOGSTREAM_ERROR("S3Upload", "Upload confirmation failed for dataId: " << dataId 
+                               << " - Failed uploads: " << response["failedUploads"].size());
+            return false;
+        } else {
+            AWS_LOGSTREAM_WARN("S3Upload", "Upload confirmation unclear for dataId: " << dataId 
+                              << " - No success or failed uploads found");
+            return false;
+        }
+        
+    } catch (const std::exception& e) {
+        AWS_LOGSTREAM_ERROR("S3Upload", "Exception in ConfirmUploadRawFile: " << e.what());
+        return false;
+    } catch (...) {
+        AWS_LOGSTREAM_ERROR("S3Upload", "Unknown exception in ConfirmUploadRawFile");
+        return false;
+    }
 }
 
 // S3 client creation helper
