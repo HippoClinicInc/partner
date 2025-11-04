@@ -217,6 +217,51 @@ bool ConfirmUploadRawFile(const String& dataId,
     }
 }
 
+// Backend API incremental confirmation function
+bool ConfirmIncrementalUploadFile(const String& dataId,
+                                  const String& uploadDataName, const String& patientId,
+                                  long long uploadFileSizeBytes, const String& s3ObjectKey) {
+    try {
+        // Build JSON payload (same shape as ConfirmUploadRawFile)
+        nlohmann::json payload;
+        payload["dataId"] = dataId;
+        payload["dataName"] = uploadDataName;
+        payload["fileName"] = s3ObjectKey;
+        payload["dataSize"] = uploadFileSizeBytes;
+        payload["patientId"] = patientId;
+        payload["dataType"] = 20;
+        payload["uploadDataName"] = uploadDataName;
+        payload["isRawDataInternal"] = 1;
+        payload["dataVersions"] = nlohmann::json::array({0});
+
+        // Call incremental confirm API
+        nlohmann::json response = HippoClient::ConfirmIncrementalUploadFile(payload);
+
+        // Success criteria: { "status": { "code": "OK", "message": "OK" }}
+        if (response.contains("status") && response["status"].is_object()) {
+            auto status = response["status"];
+            if (status.contains("code") && status["code"].is_string() &&
+                status.contains("message") && status["message"].is_string()) {
+                String code = status["code"].get<String>();
+                String message = status["message"].get<String>();
+                if (code == "OK" && message == "OK") {
+                    AWS_LOGSTREAM_INFO("S3Upload", "Incremental confirmation OK for dataId: " << dataId << ", file: " << s3ObjectKey);
+                    return true;
+                }
+            }
+        }
+
+        AWS_LOGSTREAM_WARN("S3Upload", "Incremental confirmation NOT OK for dataId: " << dataId << ", file: " << s3ObjectKey);
+        return false;
+    } catch (const std::exception& e) {
+        AWS_LOGSTREAM_ERROR("S3Upload", "Exception in ConfirmIncrementalUploadFile: " << e.what());
+        return false;
+    } catch (...) {
+        AWS_LOGSTREAM_ERROR("S3Upload", "Unknown exception in ConfirmIncrementalUploadFile");
+        return false;
+    }
+}
+
 // S3 client creation helper
 Aws::S3::S3Client createS3Client(const String& accessKey, 
                                 const String& secretKey, 

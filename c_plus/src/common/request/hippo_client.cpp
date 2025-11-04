@@ -32,6 +32,13 @@ json HippoClient::ConfirmUploadRawFile(const json& rawDeviceData) {
     return response;
 }
 
+json HippoClient::ConfirmIncrementalUploadFile(const json& payload) {
+    std::string url = base_url_ + "/hippo/thirdParty/file/confirmIncrementalUploadFile";
+    json response = RequestWithToken("POST", url, payload);
+    std::cout << "[confirm_incremental_upload_file] response:\n" << response.dump(2) << std::endl;
+    return response;
+}
+
 json HippoClient::GetS3Credentials(const std::string& patientId) {
     std::string url = base_url_ + "/hippo/thirdParty/file/getS3Credentials";
     json payload = {

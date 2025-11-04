@@ -28,6 +28,13 @@ public:
   static nlohmann::json ConfirmUploadRawFile(const nlohmann::json& rawDeviceData);
 
   /**
+   * Confirm incremental upload of a file (real-time signal append scenario).
+   * @param payload JSON payload, same structure as ConfirmUploadRawFile
+   * @return JSON response from the server
+   */
+  static nlohmann::json ConfirmIncrementalUploadFile(const nlohmann::json& payload);
+
+  /**
    * Get S3 credentials for accessing patient-specific folders.
    * @param patientId Patient identifier used to generate S3 credentials
    * @return JSON response containing S3 access credentials

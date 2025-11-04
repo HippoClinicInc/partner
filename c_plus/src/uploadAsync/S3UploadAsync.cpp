@@ -217,6 +217,22 @@ void asyncUploadWorker(const String& uploadId,
             progress->endTime = std::chrono::steady_clock::now();
             manager.updateProgress(uploadId, UPLOAD_SUCCESS);
             AWS_LOGSTREAM_INFO("S3Upload", "Async upload SUCCESS for ID: " << uploadId);
+
+            // 15.0: If REAL_TIME_SIGNAL_APPEND, confirm immediately for this file
+            if (progress->fileOperationType == REAL_TIME_SIGNAL_APPEND) {
+                bool incrementalConfirmSucceeded = ConfirmIncrementalUploadFile(
+                    progress->dataId,
+                    progress->uploadDataName,
+                    progress->patientId,
+                    progress->totalSize,
+                    progress->s3ObjectKey
+                );
+                if (incrementalConfirmSucceeded) {
+                    manager.updateProgress(uploadId, CONFIRM_SUCCESS);
+                } else {
+                    manager.updateProgress(uploadId, CONFIRM_FAILED);
+                }
+            }
             
             // Step 15.1: Check if this is the last file in a folder upload
             auto allUploads = manager.getAllUploadsByDataId(progress->dataId);
@@ -233,8 +249,8 @@ void asyncUploadWorker(const String& uploadId,
                 }
             }
             
-            // Step 15.2: Attempt confirmation if this is the last file or single file
-            if (allFilesCompleted && !progress->confirmationAttempted && !progress->dataId.empty()) {
+            // Step 15.2: Attempt confirmation if BATCH_CREATE and this is the last file or single file
+            if (progress->fileOperationType == BATCH_CREATE && allFilesCompleted && !progress->confirmationAttempted && !progress->dataId.empty()) {
                 progress->confirmationAttempted = true;
                 AWS_LOGSTREAM_INFO("S3Upload", "All files completed, attempting confirmation for dataId: " << progress->dataId);
                 
@@ -279,6 +295,20 @@ void asyncUploadWorker(const String& uploadId,
                         }
                     }
                     AWS_LOGSTREAM_WARN("S3Upload", "Backend confirmation FAILED for dataId: " << progress->dataId << " (uploads still successful)");
+                }
+            } else if (progress->fileOperationType == REAL_TIME_SIGNAL_APPEND && allFilesCompleted) {
+                // For real-time mode: if all files finished and all have been confirmed successfully, cleanup
+                bool allConfirmed = true;
+                for (auto& upload : allUploads) {
+                    if (!upload) continue;
+                    if (upload->status != CONFIRM_SUCCESS) {
+                        allConfirmed = false;
+                        break;
+                    }
+                }
+                if (allConfirmed) {
+                    AWS_LOGSTREAM_INFO("S3Upload", "All files confirmed via incremental API for dataId: " << progress->dataId);
+                    CleanupUploadsByDataId(progress->dataId);
                 }
             }
         } else {
@@ -330,7 +360,8 @@ extern "C" S3UPLOAD_API const char* __stdcall UploadFileAsync(
     const char* objectKey,
     const char* localFilePath,
     const char* dataId,
-    const char* patientId
+    const char* patientId,
+    int fileOperationType
 ) {
     static std::string response;
 
@@ -376,6 +407,11 @@ extern "C" S3UPLOAD_API const char* __stdcall UploadFileAsync(
         // Step 4: Register upload with manager for progress tracking and queue
         // uploadDataName and dataId will be automatically extracted inside addUpload
         manager.addUpload(uploadId, localFilePath, objectKey, patientId);
+
+        // Save operation type to progress
+        if (auto uploadProgress = manager.getUpload(uploadId)) {
+            uploadProgress->fileOperationType = (fileOperationType == REAL_TIME_SIGNAL_APPEND) ? REAL_TIME_SIGNAL_APPEND : BATCH_CREATE;
+        }
 
         // Step 5: Convert C-style parameters to C++ strings (avoid pointer lifetime issues)
         String strRegion = region;
