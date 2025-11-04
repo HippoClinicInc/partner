@@ -2,6 +2,42 @@
 echo Building S3UploadLib.dll with Visual Studio 2022
 echo.
 
+REM Check and install vcpkg dependencies if needed
+echo Checking vcpkg dependencies...
+set VCPKG_DIR=%~dp0vcpkg
+set VCPKG_INSTALLED=%VCPKG_DIR%\installed\x86-windows
+
+REM Check if nlohmann-json is installed
+if not exist "%VCPKG_INSTALLED%\include\nlohmann" (
+    echo nlohmann-json:x86-windows not found, installing...
+    cd /d "%VCPKG_DIR%"
+    call .\vcpkg install nlohmann-json:x86-windows
+    if %ERRORLEVEL% neq 0 (
+        echo Failed to install nlohmann-json:x86-windows!
+        pause
+        exit /b 1
+    )
+    cd /d "%~dp0"
+    echo nlohmann-json:x86-windows installed successfully
+)
+
+REM Check if curl is installed
+if not exist "%VCPKG_INSTALLED%\include\curl" (
+    echo curl:x86-windows not found, installing...
+    cd /d "%VCPKG_DIR%"
+    call .\vcpkg install curl:x86-windows
+    if %ERRORLEVEL% neq 0 (
+        echo Failed to install curl:x86-windows!
+        pause
+        exit /b 1
+    )
+    cd /d "%~dp0"
+    echo curl:x86-windows installed successfully
+)
+
+echo All vcpkg dependencies are ready
+echo.
+
 REM Set VS 2022 environment
 call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars32.bat"
 
