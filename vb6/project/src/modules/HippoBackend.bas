@@ -39,7 +39,8 @@ End Function
 ' Unified request with automatic token handling and 401 retry
 Private Function RequestWithToken(ByVal method As String, ByVal url As String, ByVal body As String, ByRef responseText As String) As Boolean
     Dim http As Object
-    Dim didRetry As Boolean
+    Dim retryCount As Integer
+    Const MAX_RETRIES As Integer = 3
 
     If Not EnsureLoggedIn() Then
         RequestWithToken = False
@@ -60,10 +61,10 @@ RetryRequest:
 
     responseText = http.ResponseText
 
-    ' Handle 401 Unauthorized -> refresh token once and retry
+    ' Handle 401 Unauthorized -> refresh token up to 3 times and retry
     If http.Status = 401 Then
-        If Not didRetry Then
-            didRetry = True
+        If retryCount < MAX_RETRIES Then
+            retryCount = retryCount + 1
             gJwtToken = ""
             If EnsureLoggedIn() Then
                 Set http = Nothing
@@ -99,45 +100,45 @@ Public Function LoginAndGetToken(ByRef jwtToken As String, ByRef hospitalId As S
     Dim url As String
     Dim requestBody As String
     Dim response As String
-    
+
     ' 1. Initialize HTTP client
     Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
-    
+
     ' 2. Build login request
     url = ENV_URL & "/hippo/thirdParty/user/login"
     requestBody = "{""userMessage"":{""email"":""" & LOGIN_ACCOUNT & """},""password"":""" & LOGIN_ACCOUNT_PASSWORD & """}"
-    
+
     On Error GoTo ErrorHandler
-    
+
     ' 3. Send login request
     http.Open "POST", url, False
     http.SetRequestHeader "Content-Type", "application/json"
     http.Send requestBody
-    
+
     ' 4. Process response
     response = http.ResponseText
-    
+
     ' 5. Extract token and hospital ID from JSON response
     On Error GoTo JsonError
     Dim jsonResponse As Object
     Set jsonResponse = JsonConverter.ParseJson(response)
-    
+
     jwtToken = jsonResponse("data")("jwtToken")
     hospitalId = jsonResponse("data")("userInfo")("hospitalId")
     On Error GoTo ErrorHandler
-    
+
     ' 6. Validate extracted data
     LoginAndGetToken = (jwtToken <> "" And hospitalId <> "")
     Set http = Nothing
     Exit Function
-    
+
 JsonError:
     ' 7. Handle JSON parsing errors
     Debug.Print "ERROR: JSON parsing failed"
     jwtToken = ""
     hospitalId = ""
     On Error GoTo ErrorHandler
-    
+
 ErrorHandler:
     ' 8. Handle general errors
     Debug.Print "ERROR: Login failed - " & Err.Description
@@ -151,46 +152,46 @@ Public Function CreatePatient(ByRef patientId As String) As Boolean
     Dim url As String
     Dim requestBody As String
     Dim response As String
-    
+
     ' 1. Ensure auth and build request
     If Not EnsureLoggedIn() Then
         CreatePatient = False
         Exit Function
     End If
-    
+
     ' 2. Build patient creation request
     url = ENV_URL & "/hippo/thirdParty/queryOrCreatePatient"
     requestBody = "{""hospitalId"":""" & gHospitalId & """,""user"":{""name"":""" & DEFAULT_PATIENT_NAME & """,""roles"":[3],""hospitalId"":""" & gHospitalId & """,""mrn"":""" & DEFAULT_MRN & """}}"
-    
+
     On Error GoTo ErrorHandler
-    
+
     ' 3. Send patient creation request with auto token and retry
     If Not RequestWithToken("POST", url, requestBody, response) Then
         GoTo ErrorHandler
     End If
-    
+
     ' 4. Process response
     ' response already filled
-    
+
     ' 5. Extract patient ID from JSON response
     On Error GoTo JsonError
     Dim jsonResponse As Object
     Set jsonResponse = JsonConverter.ParseJson(response)
-    
+
     patientId = jsonResponse("data")("patientId")
     On Error GoTo ErrorHandler
-    
+
     ' 6. Validate patient ID
     CreatePatient = (patientId <> "")
     Set http = Nothing
     Exit Function
-    
+
 JsonError:
     ' 7. Handle JSON parsing errors
     Debug.Print "ERROR: JSON parsing failed - " & Err.Description
     patientId = ""
     On Error GoTo ErrorHandler
-    
+
 ErrorHandler:
     ' 8. Handle general errors
     Debug.Print "ERROR: Patient creation failed - " & Err.Description
@@ -203,53 +204,53 @@ Public Function GenerateDataId(ByRef dataId As String) As Boolean
     Dim http As Object
     Dim url As String
     Dim response As String
-    
+
     ' 1. Ensure auth
     If Not EnsureLoggedIn() Then
         GenerateDataId = False
         Exit Function
     End If
-    
+
     ' 2. Build data ID generation request
     url = ENV_URL & "/hippo/thirdParty/file/generateUniqueKey" & "/1"
-    
+
     On Error GoTo ErrorHandler
-    
+
     ' 3. Send data ID generation request
     If Not RequestWithToken("GET", url, "", response) Then
         GoTo ErrorHandler
     End If
-    
+
     ' 4. Process response
     ' response already filled
-    
+
     ' 5. Extract first key from keys array
     If response <> "" Then
         On Error GoTo JsonError
         Dim jsonResponse As Object
         Set jsonResponse = JsonConverter.ParseJson(response)
-        
+
         Dim keysArray As Object
         Set keysArray = jsonResponse("data")("keys")
-        
+
         ' 6. Get first element from array
         dataId = keysArray(1)
         On Error GoTo ErrorHandler
     Else
         dataId = ""
     End If
-    
+
     ' 7. Validate data ID
     GenerateDataId = (dataId <> "")
     Set http = Nothing
     Exit Function
-    
+
 JsonError:
     ' 8. Handle JSON parsing errors
     Debug.Print "ERROR: JSON parsing failed - " & Err.Description
     dataId = ""
     On Error GoTo ErrorHandler
-    
+
 ErrorHandler:
     ' 9. Handle general errors
     Debug.Print "ERROR: Data ID generation failed - " & Err.Description
