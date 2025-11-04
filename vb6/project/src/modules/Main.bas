@@ -95,7 +95,7 @@ Sub Main()
     Dim jsonResponse As Object
     Set jsonResponse = JsonConverter.ParseJson(sdkInitResult)
 
-    If jsonResponse("code") <> UploadStatus.SDK_INIT_SUCCESS Then
+    If jsonResponse("code") <> SDK_INIT_SUCCESS Then
         Debug.Print "ERROR: AWS SDK initialization failed - code: " & sdkInitResult
         Exit Sub
     End If
@@ -262,7 +262,7 @@ Private Function UploadSingleFile(ByVal filePath As String, ByVal s3FileKey As S
     Dim startCode As Long
     startCode = startObj("code")
 
-    If startCode <> UploadStatus.UPLOAD_SUCCESS Then
+    If startCode <> UPLOAD_SUCCESS Then
         Debug.Print "ERROR: Failed to start async upload - " & startObj("message")
         UploadSingleFile = False
         Exit Function
@@ -334,26 +334,26 @@ ParseResponse:
 
         statusCode = statusObj("code")
 
-        If statusCode = UploadStatus.UPLOAD_SUCCESS Then
+        If statusCode = UPLOAD_SUCCESS Then
             ' Parse the status from the message field (which contains JSON string)
             uploadStatus = statusObj("status")
             hasSeenValidStatus = True ' Mark that we've seen a valid status
 
-            If uploadStatus = UploadStatus.CONFIRM_SUCCESS Then ' Upload and confirmation completed
+            If uploadStatus = CONFIRM_SUCCESS Then ' Upload and confirmation completed
                 isCompleted = True
                 Exit Do
-            ElseIf uploadStatus = UploadStatus.CONFIRM_FAILED Then ' Upload successful but confirmation failed
+            ElseIf uploadStatus = CONFIRM_FAILED Then ' Upload successful but confirmation failed
                 Debug.Print "WARNING: Upload completed but confirmation failed"
                 isCompleted = True ' Still consider it completed since file was uploaded
                 Exit Do
-            ElseIf uploadStatus = UploadStatus.UPLOAD_SUCCESS Then ' Upload completed, confirmation in progress
+            ElseIf uploadStatus = UPLOAD_SUCCESS Then ' Upload completed, confirmation in progress
                 ' Continue waiting for confirmation to complete
-            ElseIf uploadStatus = UploadStatus.UPLOAD_FAILED Then ' Upload failed
+            ElseIf uploadStatus = UPLOAD_FAILED Then ' Upload failed
                 isError = True
                 Debug.Print "ERROR: Upload failed - " & statusObj("errorMessage")
                 Exit Do
             End If
-        ElseIf statusCode = UploadStatus.UPLOAD_FAILED Then
+        ElseIf statusCode = UPLOAD_FAILED Then
             ' Task has been cleaned up (usually means upload completed successfully)
             If hasSeenValidStatus Then
                 ' If we've seen valid status before, this likely means upload succeeded and was cleaned up
