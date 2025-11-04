@@ -1,9 +1,9 @@
 Attribute VB_Name = "RealTimeFileAppend"
 Option Explicit
 
-' NOTE: 与 `BatchMain.bas` 的整体流程一致，唯一区别：
-' - 这里调用上传接口时传入的 FileOperationType 为 REAL_TIME_SIGNAL_APPEND（增量实时追加）
-' - 批量场景在 `BatchMain.bas` 里传入 BATCH_CREATE。
+' NOTE: The overall flow is the same as in `BatchMain.bas`.
+' - The only difference: the upload interface here uses FileOperationType as REAL_TIME_SIGNAL_APPEND (real-time incremental append).
+' - In batch scenarios (`BatchMain.bas`), BATCH_CREATE is used.
 
 ' Required references:
 ' Project -> References -> Add the following libraries
@@ -18,7 +18,7 @@ Option Explicit
 ' - FileLib.bas
 ' - Common.bas
 
-' S3 configuration常量在 Common.bas 中统一维护
+' S3 configuration constants are maintained centrally in Common.bas
 
 ' Real-time signal append upload flow
 Public Sub Main()
