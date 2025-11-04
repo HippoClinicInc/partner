@@ -39,7 +39,8 @@ End Function
 ' Unified request with automatic token handling and 401 retry
 Private Function RequestWithToken(ByVal method As String, ByVal url As String, ByVal body As String, ByRef responseText As String) As Boolean
     Dim http As Object
-    Dim didRetry As Boolean
+    Dim retryCount As Integer
+    Const MAX_RETRIES As Integer = 3
 
     If Not EnsureLoggedIn() Then
         RequestWithToken = False
@@ -60,10 +61,10 @@ RetryRequest:
 
     responseText = http.ResponseText
 
-    ' Handle 401 Unauthorized -> refresh token once and retry
+    ' Handle 401 Unauthorized -> refresh token up to 3 times and retry
     If http.Status = 401 Then
-        If Not didRetry Then
-            didRetry = True
+        If retryCount < MAX_RETRIES Then
+            retryCount = retryCount + 1
             gJwtToken = ""
             If EnsureLoggedIn() Then
                 Set http = Nothing
