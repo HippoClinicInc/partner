@@ -8,12 +8,15 @@ Option Explicit
 ' Note: VB6 will look for DLLs in the application directory and system PATH
 ' For this project structure, we need to ensure the lib directory is accessible
 
+' Set credentials and initialize AWS SDK
 ' Return type: JSON string
 ' The code is corresponds to the error code constants above
 ' { "code": 0, "message": "success" }
-Declare Function InitializeAwsSDK Lib "S3UploadLib.dll" () As String
-
-Declare Sub CleanupAwsSDK Lib "S3UploadLib.dll" ()
+Declare Function SetCredential Lib "S3UploadLib.dll" ( _
+    ByVal hippoApiUrl As String, _
+    ByVal userName As String, _
+    ByVal password As String _
+) As String
 
 ' Return type: JSON string
 ' The code is corresponds to the error code constants above
@@ -31,14 +34,12 @@ Declare Function UploadFileSync Lib "S3UploadLib.dll" ( _
 ' Start asynchronous upload to S3
 ' Return value: JSON string with upload ID on success, error on failure
 Declare Function UploadFileAsync Lib "S3UploadLib.dll" ( _
-    ByVal accessKey As String, _
-    ByVal secretKey As String, _
-    ByVal sessionToken As String, _
     ByVal region As String, _
     ByVal bucketName As String, _
     ByVal objectKey As String, _
     ByVal localFilePath As String, _
-    ByVal dataId As String _
+    ByVal dataId As String, _
+    ByVal patientId As String _
 ) As String
 
 ' Get upload status as byte array (safer for large responses)
@@ -53,11 +54,5 @@ Declare Function GetAsyncUploadStatusBytes Lib "S3UploadLib.dll" ( _
     ByVal bufferSize As Long _
 ) As Long
 
-' Clean up uploads by dataId - removes all uploads that match the dataId prefix
-' Parameters:
-'   dataId: Data ID used to identify the uploads to clean up
-' Return value: JSON string indicating success or failure
-' { "code": 2, "message": "Successfully cleaned up X upload(s) for dataId: xxx" }
-Declare Function CleanupUploadsByDataId Lib "S3UploadLib.dll" ( _
-    ByVal dataId As String _
-) As String
+' Note: CleanupUploadsByDataId is now called automatically after successful confirmation
+' No need to call it manually from VB6

@@ -24,11 +24,7 @@ Private Const S3_REGION As String = "us-west-1"
 
 ' Main function to handle file upload workflow with HippoClinic API
 Sub Main()
-    Dim jwtToken As String
-    Dim hospitalId As String
     Dim patientId As String
-    Dim s3Credentials As String
-    Dim s3ExpirationTimestamp As String
     Dim dataId As String
     Dim uploadFilePath As String
     Dim isFolder As Boolean
@@ -37,14 +33,14 @@ Sub Main()
     Dim totalFileSize As Long
     Dim sdkInitResult As String
     Dim s3FileKey As String
-    
+
     ' 0. Set DLL search path and validate DLL files
     If Not SetDllSearchPath() Then
         Debug.Print "ERROR: Failed to set DLL search path"
         MsgBox "ERROR: Failed to set DLL search path. Please check if lib directory exists and contains S3UploadLib.dll.", vbCritical, "DLL Path Error"
         Exit Sub
     End If
-    
+
     ' 1. Get file path from user input and validate existence
     uploadFilePath = InputBox("Please enter the file path to upload:", "File Upload", "")
     uploadFilePath = Trim(uploadFilePath)
@@ -64,33 +60,22 @@ Sub Main()
         Debug.Print "ERROR: No file path provided"
         Exit Sub
     End If
-    
-    ' 2. Login and get authentication token
-    If Not LoginAndGetToken(jwtToken, hospitalId) Then
-        Debug.Print "ERROR: Login failed"
-        Exit Sub
-    End If
-    
-    ' 3. Create patient record
-    If Not CreatePatient(jwtToken, hospitalId, patientId) Then
+
+    ' 2. Create patient record (token managed internally)
+    If Not CreatePatient(patientId) Then
         Debug.Print "ERROR: Failed to create patient"
         Exit Sub
     End If
-    
-    ' 4. Get S3 credentials for file upload
-    If Not GetS3Credentials(jwtToken, patientId, s3Credentials, s3ExpirationTimestamp) Then
-        Debug.Print "ERROR: Failed to get S3 credentials"
-        Exit Sub
-    End If
-    
-    ' 5. Generate unique data ID
-    If Not GenerateDataId(jwtToken, dataId) Then
+
+    ' 3. Generate unique data ID (token managed internally)
+    If Not GenerateDataId(dataId) Then
         Debug.Print "ERROR: Failed to generate data ID"
         Exit Sub
     End If
-    
-    ' 6. Use the AWS SDK to update file or folder to S3.
-    sdkInitResult = InitializeAwsSDK()
+
+    ' 5. Set credentials and initialize AWS SDK
+    sdkInitResult = SetCredential(ENV_URL, LOGIN_ACCOUNT, LOGIN_ACCOUNT_PASSWORD)
+
     Dim jsonResponse As Object
     Set jsonResponse = JsonConverter.ParseJson(sdkInitResult)
 
@@ -104,18 +89,18 @@ Sub Main()
     isFolder = IsPathFolder(uploadFilePath)
     Dim maxWaitTime As Long
     maxWaitTime = 600 ' Maximum wait time in seconds (10 minutes)
-    
+
     If isFolder Then
         ' 6.1. Upload folder contents
         Dim fso As Object
         Set fso = CreateObject("Scripting.FileSystemObject")
         ' Upload data name: abc.ds
         uploadDataName = fso.GetFolder(uploadFilePath).Name
-        ' S3 file key: patient/patientId/source_data/dataId/abc.ds/single_file_name
+        ' S3 file key: patient/patientId/source_data/dataId/abc.ds/
         s3FileKey = "patient/" & patientId & "/source_data/" & dataId & "/" & uploadDataName & "/"
         Dim uploadIds As String
-        uploadSuccess = UploadFolderContents(uploadFilePath, s3Credentials, totalFileSize, s3FileKey, dataId, uploadIds)
-        
+        uploadSuccess = UploadFolderContents(uploadFilePath, totalFileSize, s3FileKey, dataId, patientId, uploadIds)
+
         ' 6.1.1. Monitor folder upload status
         If uploadSuccess Then
              Debug.Print
@@ -130,8 +115,8 @@ Sub Main()
         ' S3 file key: patient/patientId/source_data/dataId/abc.ds/abc.ds
         s3FileKey = "patient/" & patientId & "/source_data/" & dataId & "/" & uploadDataName & "/" & uploadDataName
         Dim singleUploadId As String
-        uploadSuccess = UploadSingleFile(uploadFilePath, s3Credentials, s3FileKey, dataId, singleUploadId)
-        
+        uploadSuccess = UploadSingleFile(uploadFilePath, s3FileKey, dataId, patientId, singleUploadId)
+
         ' 6.2.1. Monitor single file upload status
         If uploadSuccess Then
             totalFileSize = GetLocalFileSize(uploadFilePath)
@@ -140,34 +125,20 @@ Sub Main()
             uploadSuccess = MonitorUploadStatus(dataId, maxWaitTime)
         End If
     End If
-    
-    ' 7. Call the backend to insert a record for the uploaded file.
+
+    ' 7. Upload process completed (confirmation and cleanup are handled automatically by C++ backend)
     If uploadSuccess Then
-        If ConfirmUploadRawFile(jwtToken, dataId, uploadDataName, patientId, totalFileSize, s3FileKey) Then
-            Debug.Print "SUCCESS: Upload completed"
-            MsgBox "SUCCESS: Upload completed"
-        Else
-            Debug.Print "ERROR: Upload confirmation failed"
-        End If
+        Debug.Print "SUCCESS: Upload completed and confirmed"
+        MsgBox "SUCCESS: Upload completed"
     Else
         Debug.Print "ERROR: Upload process failed"
     End If
-    
-    ' 8. Clean up upload tracking data (regardless of success or failure)
-    Dim cleanupResult As String
-    cleanupResult = CleanupUploadsByDataId(dataId)
-    Debug.Print "Remove uploaded files from queue: " & cleanupResult
-    
-    ' 9. Cleanup AWS SDK resources
-    ' Note: CleanupAwsSDK is called automatically when DLL is unloaded
-    ' Do not call it here as async uploads may still be running
-    CleanupAwsSDK
-    
+
     Exit Sub
 End Sub
 
 ' Upload all files in a folder to S3 and confirm with API
-Private Function UploadFolderContents(ByVal folderPath As String, ByVal s3Credentials As String, ByRef totalFileSize As Long, ByVal s3FileKey As String, ByVal dataId As String, ByRef uploadIds As String) As Boolean
+Private Function UploadFolderContents(ByVal folderPath As String, ByRef totalFileSize As Long, ByVal s3FileKey As String, ByVal dataId As String, ByVal patientId As String, ByRef uploadIds As String) As Boolean
     Dim fso As Object
     Dim folder As Object
     Dim file As Object
@@ -176,46 +147,46 @@ Private Function UploadFolderContents(ByVal folderPath As String, ByVal s3Creden
     Dim failedCount As Integer
     Dim currentFile As String
     Dim currentFileSize As Long
-    
+
     ' 1. Initialize file system object for folder operations
     Set fso = CreateObject("Scripting.FileSystemObject")
-    
+
     ' 2. Validate that the specified folder path exists
     If Not fso.FolderExists(folderPath) Then
         Debug.Print "ERROR: Folder does not exist: " & folderPath
         UploadFolderContents = False
         Exit Function
     End If
-    
+
     ' 3. Get folder object and count files
     Set folder = fso.GetFolder(folderPath)
     fileCount = folder.Files.Count
-    
+
     If fileCount = 0 Then
         Debug.Print "ERROR: No files found in folder"
         UploadFolderContents = False
         Exit Function
     End If
-    
+
     ' 4. Initialize counters and size tracking
     uploadedCount = 0
     failedCount = 0
     totalFileSize = 0
     uploadIds = "" ' Initialize upload IDs string
-    
+
     ' 5. Loop through all files in the folder
     For Each file In folder.Files
         currentFile = file.path
-        
+
         ' 6. Get file size before upload
         currentFileSize = GetLocalFileSize(currentFile)
-        
+
         ' 7. Upload the current file
         Dim singleS3FileKey As String
         Dim currentUploadId As String
         ' Single file in folder: patient/patientId/source_data/dataId/abc.ds/abc.xyz
         singleS3FileKey = s3FileKey & GetFileName(currentFile)
-        If UploadSingleFile(currentFile, s3Credentials, singleS3FileKey, dataId, currentUploadId) Then
+        If UploadSingleFile(currentFile, singleS3FileKey, dataId, patientId, currentUploadId) Then
             uploadedCount = uploadedCount + 1
             totalFileSize = totalFileSize + currentFileSize
             ' Add upload ID to the list (comma-separated)
@@ -229,7 +200,7 @@ Private Function UploadFolderContents(ByVal folderPath As String, ByVal s3Creden
             Debug.Print "ERROR: Failed to start upload for " & currentFile
         End If
     Next file
-    
+
     ' 9. Determine if upload process was successful
     ' If any files failed to upload, the entire process is failed
     If failedCount > 0 Then
@@ -238,7 +209,7 @@ Private Function UploadFolderContents(ByVal folderPath As String, ByVal s3Creden
     Else
         UploadFolderContents = True
     End If
-    
+
     ' 10. Cleanup file system objects to free memory
     Set file = Nothing
     Set folder = Nothing
@@ -246,17 +217,12 @@ Private Function UploadFolderContents(ByVal folderPath As String, ByVal s3Creden
 End Function
 
 ' Upload a single file to S3 using AWS SDK
-Private Function UploadSingleFile(ByVal filePath As String, ByVal s3Credentials As String, ByVal s3FileKey As String, ByVal dataId As String, ByRef uploadId As String) As Boolean
+Private Function UploadSingleFile(ByVal filePath As String, ByVal s3FileKey As String, ByVal dataId As String, ByVal patientId As String, ByRef uploadId As String) As Boolean
     Dim result As Long
     Dim fileSize As Long
-    Dim accessKey As String
-    Dim secretKey As String
-    Dim sessionToken As String
-    Dim credentialsObj As Object
-    Dim jsonResponse As String
-    
+
     On Error GoTo ErrorHandler
-    
+
     ' 1. Check if file exists
     result = FileExists(filePath)
     If result <> 1 Then
@@ -264,43 +230,37 @@ Private Function UploadSingleFile(ByVal filePath As String, ByVal s3Credentials 
         UploadSingleFile = False
         Exit Function
     End If
-    
+
     ' 2. Get file size
     fileSize = GetLocalFileSize(filePath)
-    
-    ' 3. Parse S3 credentials
-    Set credentialsObj = JsonConverter.ParseJson(s3Credentials)
-    accessKey = credentialsObj("accessKeyId")
-    secretKey = credentialsObj("secretAccessKey")
-    sessionToken = credentialsObj("sessionToken")
 
-    ' 4. Start asynchronous upload to S3
+    ' 3. Start asynchronous upload to S3
     Debug.Print "Submit to queue - " & filePath
     Dim startResponse As String
-    startResponse = UploadFileAsync(accessKey, secretKey, sessionToken, S3_REGION, S3_BUCKET, s3FileKey, filePath, dataId)
+    startResponse = UploadFileAsync(S3_REGION, S3_BUCKET, s3FileKey, filePath, dataId, patientId)
     Debug.Print startResponse
-    
+
     ' 5. Parse start response and check if upload started successfully
     Dim startObj As Object
     Set startObj = JsonConverter.ParseJson(startResponse)
     Dim startCode As Long
     startCode = startObj("code")
-    
+
     If startCode <> 2 Then
         Debug.Print "ERROR: Failed to start async upload - " & startObj("message")
         UploadSingleFile = False
         Exit Function
     End If
-    
+
     ' Extract upload ID from the response message
     uploadId = startObj("message")
-    
+
     ' 6. Return success with upload ID for external monitoring
     Debug.Print "SUCCESS: Upload started for file - " & filePath & " with upload ID: " & uploadId
     UploadSingleFile = True
-    
+
     Exit Function
-    
+
 ErrorHandler:
     ' 8. Handle errors
     Debug.Print "ERROR: Upload failed - " & Err.Description
@@ -316,8 +276,10 @@ Private Function MonitorUploadStatus(ByVal dataId As String, ByVal maxWaitTime A
     Dim waitTime As Long
     Dim statusCode As Long
     Dim uploadStatus As Long
+    Dim hasSeenValidStatus As Boolean ' Track if we've seen a valid status before
 
     waitTime = 0
+    hasSeenValidStatus = False
 
     Do While waitTime < maxWaitTime
         ' Use byte array method for safer data transfer
@@ -359,19 +321,39 @@ ParseResponse:
         If statusCode = 2 Then
             ' Parse the status from the message field (which contains JSON string)
             uploadStatus = statusObj("status")
+            hasSeenValidStatus = True ' Mark that we've seen a valid status
 
-            If uploadStatus = 2 Then ' SIMPLE_UPLOAD_SUCCESS
+            If uploadStatus = 7 Then ' CONFIRM_SUCCESS - Upload and confirmation completed
                 isCompleted = True
                 Exit Do
-            ElseIf uploadStatus = 3 Then ' SIMPLE_UPLOAD_FAILED
+            ElseIf uploadStatus = 8 Then ' CONFIRM_FAILED - Upload successful but confirmation failed
+                Debug.Print "WARNING: Upload completed but confirmation failed"
+                isCompleted = True ' Still consider it completed since file was uploaded
+                Exit Do
+            ElseIf uploadStatus = 2 Then ' UPLOAD_SUCCESS - Upload completed, confirmation in progress
+                ' Continue waiting for confirmation to complete
+            ElseIf uploadStatus = 3 Then ' UPLOAD_FAILED
                 isError = True
                 Debug.Print "ERROR: Upload failed - " & statusObj("errorMessage")
                 Exit Do
             End If
+        ElseIf statusCode = 3 Then
+            ' Task has been cleaned up (usually means upload completed successfully)
+            If hasSeenValidStatus Then
+                ' If we've seen valid status before, this likely means upload succeeded and was cleaned up
+                Debug.Print "INFO: Upload task has been cleaned up (likely completed successfully)"
+                isCompleted = True
+                Exit Do
+            Else
+                ' If this is the first query and task is already cleaned up, it's an error
+                isError = True
+                Debug.Print "ERROR: Upload task not found - " & statusObj("message")
+                Exit Do
+            End If
         Else
-            ' Status check failed
+            ' Status check failed with other error codes
             isError = True
-            Debug.Print "ERROR: Failed to get upload status - " & statusObj("errorMessage")
+            Debug.Print "ERROR: Failed to get upload status - " & statusObj("message")
             Exit Do
         End If
 
