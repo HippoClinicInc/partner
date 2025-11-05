@@ -4,12 +4,6 @@ Attribute VB_Name = "S3UploadLib"
 
 Option Explicit
 
-' File operation type - keep in sync with C++ enum FileOperationType
-Public Enum FileOperationType
-    BATCH_CREATE = 0
-    REAL_TIME_SIGNAL_APPEND = 1
-End Enum
-
 ' API Declarations - DLL files are located in the lib directory
 ' Note: VB6 will look for DLLs in the application directory and system PATH
 ' For this project structure, we need to ensure the lib directory is accessible

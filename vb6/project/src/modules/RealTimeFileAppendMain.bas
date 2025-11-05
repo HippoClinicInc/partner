@@ -1,4 +1,4 @@
-Attribute VB_Name = "RealTimeFileAppend"
+Attribute VB_Name = "RealTimeFileAppendMain"
 Option Explicit
 
 ' NOTE: The overall flow is the same as in `BatchMain.bas`.
@@ -41,7 +41,7 @@ Public Sub Main()
     uploadFilePath = InputBox("Please enter the file path to upload (real-time):", "File Upload (Real-time)", "")
     uploadFilePath = Trim(uploadFilePath)
     If Len(uploadFilePath) > 1 Then
-        If (Left(uploadFilePath, 1) = "\"" And Right(uploadFilePath, 1) = "\"") Or _
+        If (Left(uploadFilePath, 1) = Chr(34) And Right(uploadFilePath, 1) = Chr(34)) Or _
            (Left(uploadFilePath, 1) = "'" And Right(uploadFilePath, 1) = "'") Then
             uploadFilePath = Mid(uploadFilePath, 2, Len(uploadFilePath) - 2)
         End If
@@ -61,9 +61,44 @@ Public Sub Main()
         Exit Sub
     End If
 
-    If Not GenerateDataId(dataId) Then
-        Debug.Print "ERROR: Failed to generate data ID"
-        Exit Sub
+    ' Determine if upload is folder or single file
+    isFolder = IsPathFolder(uploadFilePath)
+    
+    ' For single file upload, ask user to choose between new or append
+    If Not isFolder Then
+        Dim userChoice As String
+        userChoice = InputBox("Please choose upload mode:" & vbCrLf & _
+                              "1 - New (create new dataId)" & vbCrLf & _
+                              "2 - Append (use existing dataId)", _
+                              "Upload Mode", "1")
+        
+        If userChoice = "" Then
+            Debug.Print "ERROR: User cancelled upload mode selection"
+            Exit Sub
+        End If
+        
+        If userChoice = "2" Then
+            ' Append mode: ask user to input existing dataId
+            dataId = InputBox("Please enter the existing dataId to append:", "Append Mode", "")
+            dataId = Trim(dataId)
+            If dataId = "" Then
+                Debug.Print "ERROR: No dataId provided for append mode"
+                Exit Sub
+            End If
+            Debug.Print "Using existing dataId for append: " & dataId
+        Else
+            ' New mode: generate new dataId (default behavior)
+            If Not GenerateDataId(dataId) Then
+                Debug.Print "ERROR: Failed to generate data ID"
+                Exit Sub
+            End If
+        End If
+    Else
+        ' Folder upload: always generate new dataId
+        If Not GenerateDataId(dataId) Then
+            Debug.Print "ERROR: Failed to generate data ID"
+            Exit Sub
+        End If
     End If
 
     sdkInitResult = SetCredential(ENV_URL, LOGIN_ACCOUNT, LOGIN_ACCOUNT_PASSWORD)
@@ -74,7 +109,6 @@ Public Sub Main()
         Exit Sub
     End If
 
-    isFolder = IsPathFolder(uploadFilePath)
     Dim maxWaitTime As Long
     maxWaitTime = 600
 

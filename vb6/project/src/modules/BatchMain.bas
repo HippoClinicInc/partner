@@ -6,7 +6,7 @@ Option Explicit
 ' - Microsoft WinHTTP Services 5.1
 ' - Microsoft Scripting Runtime (for Dictionary object)
 
-" Windows API declaration moved to Common.bas
+' Windows API declaration moved to Common.bas
 
 ' Required files:
 ' Project -> Add file -> Add the following files
@@ -14,8 +14,9 @@ Option Explicit
 ' - S3UploadLib.bas
 ' - HippoBackend.bas
 ' - FileLib.bas
+' - Common.bas
 
-" S3 configuration constants moved to Common.bas
+' S3 configuration constants moved to Common.bas
 
 ' Main function to handle file upload workflow with HippoClinic API
 Sub Main()
@@ -40,7 +41,7 @@ Sub Main()
     uploadFilePath = InputBox("Please enter the file path to upload:", "File Upload", "")
     uploadFilePath = Trim(uploadFilePath)
     If Len(uploadFilePath) > 1 Then
-        If (Left(uploadFilePath, 1) = "\"" And Right(uploadFilePath, 1) = "\"") Or _
+        If (Left(uploadFilePath, 1) = Chr(34) And Right(uploadFilePath, 1) = Chr(34)) Or _
            (Left(uploadFilePath, 1) = "'" And Right(uploadFilePath, 1) = "'") Then
             uploadFilePath = Mid(uploadFilePath, 2, Len(uploadFilePath) - 2)
         End If
