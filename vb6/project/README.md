@@ -6,16 +6,19 @@
 project/
 ├── src/                    # Source code directory
 │   └── modules/           # Module files
-│       ├── Main.bas      # Main program logic
-│       ├── JsonConverter.bas  # JSON processing
-│       ├── S3UploadLib.bas    # S3 upload library declarations
-│       ├── HippoBackend.bas   # Backend API calls
-│       ├── FileLib.bas        # File operation utilities
-│       └── DllPathManager.bas # DLL path management
+│       ├── BatchMain.bas             # Batch upload main program logic
+│       ├── RealTimeFileAppendMain.bas # Real-time file append upload main program
+│       ├── Common.bas                # Common utilities and shared functions
+│       ├── JsonConverter.bas         # JSON processing
+│       ├── S3UploadLib.bas           # S3 upload library declarations
+│       ├── HippoBackend.bas          # Backend API calls
+│       ├── FileLib.bas               # File operation utilities
+│       └── DllPathManager.bas        # DLL path management
 ├── lib/                   # Library files directory
 │   ├── *.dll             # AWS SDK DLL files
 │   └── S3UploadLib.dll   # Custom S3 upload library
-├── Project1.vbp         # VB6 project file
+├── Project1.vbp         # VB6 project file (Batch upload scenario - BatchMain.bas)
+├── Project2.vbp         # VB6 project file (Real-time append scenario - RealTimeFileAppendMain.bas)
 └── README.md            # Project documentation
 ```
 
@@ -23,8 +26,8 @@ project/
 
 ### Core VB6 Modules
 
-#### `Main.bas`
-**Main application module** - Contains the complete file upload workflow:
+#### `BatchMain.bas`
+**Batch Upload Main Module** - Contains the complete batch file upload workflow:
 - **Main()** - Primary workflow function with 11-step process
 - **StartUpload()** - GUI-based upload function with progress display
 
@@ -33,6 +36,29 @@ project/
 - `StartUpload()` - GUI-based upload with progress tracking
 - `UploadSingleFile()` - Upload individual files to S3
 - `UploadFolderContents()` - Batch upload entire folders
+
+#### `RealTimeFileAppendMain.bas`
+**Real-Time File Append Upload Module** - Handles real-time file append upload workflow:
+- **Real-Time Monitoring** - Monitor file changes and upload new content in real-time
+- **Incremental Upload** - Upload only the newly appended portions of files
+- **Resume Support** - Support resuming uploads from interruption points
+
+**Key Functions:**
+- `RealTimeFileAppendUpload()` - Main function for real-time file append upload
+- Monitor file size changes
+- Upload incremental data only
+- Maintain upload state and offset positions
+
+#### `Common.bas`
+**Common Utilities Module** - Contains shared functions and utilities used across modules:
+- **Shared Constants** - Project-level configuration constants
+- **Utility Functions** - Common functions used by multiple modules
+- **Helper Functions** - General-purpose helper and utility functions
+
+**Key Features:**
+- Shared configuration and constant definitions
+- Common utility functions
+- Cross-module shared logic
 
 #### `HippoBackend.bas`
 **HippoClinic API Integration** - Backend API communication module:
@@ -109,6 +135,24 @@ project/
 - `zlib1.dll` (77KB) - Compression library
 - `S3UploadLib.dll` (87KB) - Custom S3 wrapper library
 
+## 📦 Project Files
+
+This project includes two separate VB6 project files for different upload scenarios:
+
+### `Project1.vbp` - Batch Upload Scenario
+- **Main Module**: BatchMain.bas
+- **Purpose**: Traditional batch file and folder upload
+- **Use Case**: Upload single files or entire folders at once
+- **Features**: Complete upload workflow with GUI progress tracking
+
+### `Project2.vbp` - Real-Time File Append Scenario
+- **Main Module**: RealTimeFileAppendMain.bas
+- **Purpose**: Real-time incremental file append upload
+- **Use Case**: Monitor and upload file changes in real-time
+- **Features**: Incremental upload, resume support, offset management
+
+> **Note**: Both projects share the same common modules (Common.bas, HippoBackend.bas, FileLib.bas, S3UploadLib.bas, JsonConverter.bas, DllPathManager.bas) but have different entry points.
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -150,15 +194,26 @@ You can find the installer in the `cpp_runtime` folder. click the `install_all.b
 ### Setup Instructions
 
 1. **Open Project with Visual Basic 6.0**
+   
+   Choose the appropriate project file based on your use case:
+   
+   **For Batch Upload:**
    ```
    Open Project1.vbp with Visual Basic 6.0
+   ```
+   
+   **For Real-Time File Append Upload:**
+   ```
+   Open Project2.vbp with Visual Basic 6.0
    ```
 
 2. **Verify All Modules Are Loaded**
    Check that the following modules appear in the Project Explorer:
    ```
    Project Explorer should show:
-   - Main.bas
+   - BatchMain.bas
+   - RealTimeFileAppendMain.bas
+   - Common.bas
    - HippoBackend.bas
    - FileLib.bas
    - S3UploadLib.bas  
@@ -189,8 +244,8 @@ You can find the installer in the `cpp_runtime` folder. click the `install_all.b
 
 5. **Configure Constants**
    ```
-   Edit Main.bas and HippoBackend.bas constants sections:
-   - Main.bas: S3_BUCKET, S3_REGION
+   Edit Common.bas and HippoBackend.bas constants sections:
+   - Common.bas: S3_BUCKET, S3_REGION (shared configuration)
    - HippoBackend.bas: ENV_URL, LOGIN_ACCOUNT, LOGIN_ACCOUNT_PASSWORD
    ```
 
@@ -208,15 +263,17 @@ Private Const LOGIN_ACCOUNT As String = "your-email@example.com"
 Private Const LOGIN_ACCOUNT_PASSWORD As String = "your-password"
 ```
 
-### S3 Configuration (Main.bas)
+### S3 Configuration (Common.bas)
 ```vb
-Private Const S3_BUCKET As String = "hippoclinic-staging"
-Private Const S3_REGION As String = "us-west-1"
+Public Const S3_BUCKET As String = "hippoclinic-staging"
+Public Const S3_REGION As String = "us-west-1"
 ```
 
 ## 📋 Usage
 
-### Single File Upload
+### Batch Upload Mode (BatchMain.bas)
+
+#### Single File Upload
 1. Run the application
 2. Enter file path when prompted
 3. System will:
@@ -227,7 +284,7 @@ Private Const S3_REGION As String = "us-west-1"
    - Upload file to S3
    - Confirm upload with API
 
-### Folder Upload
+#### Folder Upload
 1. Run the application
 2. Enter folder path when prompted
 3. System will:
@@ -235,6 +292,18 @@ Private Const S3_REGION As String = "us-west-1"
    - Upload each file individually
    - Provide batch upload summary
    - Confirm entire batch with API
+
+### Real-Time File Append Mode (RealTimeFileAppendMain.bas)
+
+#### Incremental File Upload
+1. Run the real-time upload function
+2. Specify the file to monitor
+3. System will:
+   - Monitor file size changes
+   - Upload only new appended data
+   - Maintain upload offset position
+   - Support resume from interruption
+   - Confirm incremental uploads with API
 
 ## 🐛 Debugging
 
@@ -398,7 +467,9 @@ Ensure the following directory structure exists on the new computer:
 ```
 src/
 └── modules/
-    ├── Main.bas
+    ├── BatchMain.bas
+    ├── RealTimeFileAppendMain.bas
+    ├── Common.bas
     ├── JsonConverter.bas
     ├── S3UploadLib.bas
     ├── HippoBackend.bas
@@ -420,8 +491,10 @@ If files exist but VB6 doesn't load them:
 3. Reopen VB6 and load `Project1.vbp`
 4. VB6 will recreate the workspace file with correct paths
 
-#### Method 4: Use Alternative Project File
-If problems persist, use the `Project1_fixed.vbp` file which has been verified to work correctly.
+#### Method 4: Verify Correct Project File
+Make sure you're opening the correct project file for your use case:
+- `Project1.vbp` - For batch upload scenarios (BatchMain.bas)
+- `Project2.vbp` - For real-time append scenarios (RealTimeFileAppendMain.bas)
 
 ### Prevention Tips
 1. **Complete File Copy**: Always copy the entire project directory including all subdirectories
