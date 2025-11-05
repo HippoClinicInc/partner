@@ -236,6 +236,7 @@ bool ConfirmIncrementalUploadFile(const String& dataId,
 
         // Call incremental confirm API
         nlohmann::json response = HippoClient::ConfirmIncrementalUploadFile(payload);
+        AWS_LOGSTREAM_INFO("S3Upload", "Incremental confirmation response: " << response.dump(2));
 
         // Success criteria: { "status": { "code": "OK", "message": "OK" }}
         if (response.contains("status") && response["status"].is_object()) {

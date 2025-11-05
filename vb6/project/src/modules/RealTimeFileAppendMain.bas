@@ -119,6 +119,14 @@ Public Sub Main()
 
     If isFolder Then
         ' 5.1. Upload folder contents
+        ' 5.1.1. Validate folder contents first
+        Dim validationError As String
+        If Not ValidateFolderContents(uploadFilePath, validationError) Then
+            Debug.Print "ERROR: Folder validation failed - " & validationError
+            MsgBox "ERROR: " & validationError, vbCritical, "Folder Validation Failed"
+            Exit Sub
+        End If
+        
         Dim fso As Object
         Set fso = CreateObject("Scripting.FileSystemObject")
         ' Upload data name: abc.ds
