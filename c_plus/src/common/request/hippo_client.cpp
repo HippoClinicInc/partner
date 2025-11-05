@@ -34,7 +34,7 @@ json HippoClient::ConfirmUploadRawFile(const json& rawDeviceData) {
 
 json HippoClient::ConfirmIncrementalUploadFile(const json& payload) {
     std::string url = base_url_ + "/hippo/thirdParty/file/confirmIncrementalUploadFile";
-    json response = RequestWithToken("POST", url, payload);
+    json response = RequestWithToken("POST", url, payload, 3, 300);
     std::cout << "[confirm_incremental_upload_file] response:\n" << response.dump(2) << std::endl;
     return response;
 }
@@ -110,13 +110,14 @@ bool HippoClient::LoginWithRetries(int maxLoginRetries) {
 json HippoClient::RequestWithToken(const std::string& method,
                                    const std::string& url,
                                    const json& payload,
-                                   int maxRetries) {
+                                   int maxRetries,
+                                   long timeoutSeconds) {
     int attempt = 0;
     while (attempt < maxRetries) {
         try {
             std::string token = GetToken();
             std::cout << "[HippoClient] Making request to: " << url << std::endl;
-            json response = HttpRequest(method, url, payload, token);
+            json response = HttpRequest(method, url, payload, token, timeoutSeconds);
             return response;
         } catch (const std::exception& error) {
             std::string error_message = error.what();
@@ -174,12 +175,14 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* use
  * @param url     Full request URL
  * @param payload JSON payload (only used for POST/PUT requests)
  * @param token   Authorization token (optional, format: "Bearer <token>")
+ * @param timeoutSeconds Total timeout in seconds (default: 30)
  * @return json   Parsed JSON response (returns "data" field if present, otherwise full response)
  */
 json HippoClient::HttpRequest(const std::string& method,
                               const std::string& url,
                               const json& payload,
-                              const std::string& token) {
+                              const std::string& token,
+                              long timeoutSeconds) {
     // 1. Initialize CURL handle
     CURL* curl_handle = curl_easy_init();
     if (!curl_handle) {
@@ -212,7 +215,7 @@ json HippoClient::HttpRequest(const std::string& method,
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYHOST, 2L); // Verify hostname matches certificate
 
     // 6. Timeout settings (prevent long blocking)
-    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 30L);        // Total request timeout: 30 seconds
+    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, timeoutSeconds);        // Total request timeout (configurable)
     curl_easy_setopt(curl_handle, CURLOPT_CONNECTTIMEOUT, 10L); // Connection timeout: 10 seconds
 
     // 7. For POST/PUT requests, serialize JSON payload and attach to request body

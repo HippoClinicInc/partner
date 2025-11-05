@@ -282,6 +282,11 @@ String getUploadId(const String& dataId, long long timestamp);
 // Returns the uploadDataName extracted from the path
 String extractUploadDataName(const String& objectKey);
 
+// Extract file name from S3 objectKey
+// objectKey format: "patient/patientId/source_data/dataId/uploadDataName/filename"
+// Returns the filename extracted from the path (the last segment after the last slash)
+String extractFileName(const String& objectKey);
+
 // AWS SDK management functions (extern "C" declarations)
 extern "C" {
     S3UPLOAD_API int __stdcall FileExists(const char* filePath);

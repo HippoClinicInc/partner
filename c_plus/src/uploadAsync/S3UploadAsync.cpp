@@ -8,6 +8,10 @@ static std::atomic<bool> g_isUploading(false);
 static std::atomic<int> g_activeUploads(0);
 static const int MAX_CONCURRENT_UPLOADS = 1;  // Only allow one upload at a time
 
+// Global confirmation lock - ensures only one confirmation request runs at a time for REAL_TIME_SIGNAL_APPEND
+// This prevents backend dataId lock conflicts when multiple files are uploaded to the same dataId
+static std::mutex g_confirmMutex;
+
 // Async upload worker thread function
 // This function runs in a separate thread to handle file upload to S3
 void asyncUploadWorker(const String& uploadId,
@@ -217,21 +221,57 @@ void asyncUploadWorker(const String& uploadId,
             progress->endTime = std::chrono::steady_clock::now();
             manager.updateProgress(uploadId, UPLOAD_SUCCESS);
             AWS_LOGSTREAM_INFO("S3Upload", "Async upload SUCCESS for ID: " << uploadId);
+        } else {
+            manager.updateProgress(uploadId, UPLOAD_FAILED, finalErrorMsg);
+            AWS_LOGSTREAM_ERROR("S3Upload", "Async upload FAILED for ID: " << uploadId << " after " << (MAX_UPLOAD_RETRIES + 1) << " attempts - " << finalErrorMsg);
+        }
+        
+        // Step 16: Release upload lock to allow next upload to start
+        {
+            std::lock_guard<std::mutex> lock(g_uploadMutex);
+            g_activeUploads--;
+            g_isUploading = false;
+        }
+        g_uploadCondition.notify_all();
 
-            // 15.0: If REAL_TIME_SIGNAL_APPEND, confirm immediately for this file
+        // Step 17: Handle confirmation AFTER releasing upload lock
+        // This allows the next file to start uploading while this file is being confirmed
+        if (uploadSuccess) {
+            AWS_LOGSTREAM_INFO("S3Upload", "Upload success, checking fileOperationType for ID: " << uploadId 
+                              << ", fileOperationType: " << progress->fileOperationType 
+                              << " (REAL_TIME_SIGNAL_APPEND=" << REAL_TIME_SIGNAL_APPEND 
+                              << ", BATCH_CREATE=" << BATCH_CREATE << ")");
+            
+            // 17.0: If REAL_TIME_SIGNAL_APPEND, confirm immediately for this file
             if (progress->fileOperationType == REAL_TIME_SIGNAL_APPEND) {
+                // Use confirmation lock to serialize confirmation requests
+                // This prevents backend dataId lock conflicts
+                AWS_LOGSTREAM_INFO("S3Upload", "Waiting for confirmation lock for ID: " << uploadId << ", dataId: " << progress->dataId);
+                std::lock_guard<std::mutex> confirmLock(g_confirmMutex);
+                
+                AWS_LOGSTREAM_INFO("S3Upload", "Acquired confirmation lock for ID: " << uploadId << ", dataId: " << progress->dataId);
+                
+                // For incremental upload, use the actual file name instead of the folder name
+                String actualFileName = extractFileName(progress->s3ObjectKey);
                 bool incrementalConfirmSucceeded = ConfirmIncrementalUploadFile(
                     progress->dataId,
-                    progress->uploadDataName,
+                    actualFileName,  // Use actual file name for dataName and uploadDataName
                     progress->patientId,
                     progress->totalSize,
                     progress->s3ObjectKey
                 );
+                
+                AWS_LOGSTREAM_INFO("S3Upload", "ConfirmIncrementalUploadFile returned for ID: " << uploadId << ", success: " << incrementalConfirmSucceeded);
+                
                 if (incrementalConfirmSucceeded) {
                     manager.updateProgress(uploadId, CONFIRM_SUCCESS);
+                    AWS_LOGSTREAM_INFO("S3Upload", "Confirmation SUCCESS for ID: " << uploadId);
                 } else {
                     manager.updateProgress(uploadId, CONFIRM_FAILED);
+                    AWS_LOGSTREAM_WARN("S3Upload", "Confirmation FAILED for ID: " << uploadId);
                 }
+                
+                AWS_LOGSTREAM_INFO("S3Upload", "Released confirmation lock for ID: " << uploadId << ", dataId: " << progress->dataId);
             }
             
             // Step 15.1: Check if this is the last file in a folder upload
@@ -311,18 +351,7 @@ void asyncUploadWorker(const String& uploadId,
                     CleanupUploadsByDataId(progress->dataId);
                 }
             }
-        } else {
-            manager.updateProgress(uploadId, UPLOAD_FAILED, finalErrorMsg);
-            AWS_LOGSTREAM_ERROR("S3Upload", "Async upload FAILED for ID: " << uploadId << " after " << (MAX_UPLOAD_RETRIES + 1) << " attempts - " << finalErrorMsg);
         }
-        
-        // Step 16: Release upload lock to allow next upload to start
-        {
-            std::lock_guard<std::mutex> lock(g_uploadMutex);
-            g_activeUploads--;
-            g_isUploading = false;
-        }
-        g_uploadCondition.notify_all();
 
     } catch (const std::exception& e) {
         // Step 17: Handle exceptions during upload
@@ -411,6 +440,13 @@ extern "C" S3UPLOAD_API const char* __stdcall UploadFileAsync(
         // Save operation type to progress
         if (auto uploadProgress = manager.getUpload(uploadId)) {
             uploadProgress->fileOperationType = (fileOperationType == REAL_TIME_SIGNAL_APPEND) ? REAL_TIME_SIGNAL_APPEND : BATCH_CREATE;
+            AWS_LOGSTREAM_INFO("S3Upload", "Setting fileOperationType for uploadId: " << uploadId 
+                              << ", input fileOperationType: " << fileOperationType 
+                              << ", set to: " << uploadProgress->fileOperationType
+                              << " (REAL_TIME_SIGNAL_APPEND=" << REAL_TIME_SIGNAL_APPEND 
+                              << ", BATCH_CREATE=" << BATCH_CREATE << ")");
+        } else {
+            AWS_LOGSTREAM_ERROR("S3Upload", "Failed to get upload progress for uploadId: " << uploadId);
         }
 
         // Step 5: Convert C-style parameters to C++ strings (avoid pointer lifetime issues)

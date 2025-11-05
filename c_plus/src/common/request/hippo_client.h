@@ -69,12 +69,14 @@ private:
    * @param url Full request URL
    * @param payload JSON payload (only used for POST/PUT requests)
    * @param maxRetries Maximum number of retry attempts for failed requests
+   * @param timeoutSeconds Total timeout in seconds (default: 30)
    * @return JSON response from the server
    */
   static nlohmann::json RequestWithToken(const std::string& method,
                                          const std::string& url,
                                          const nlohmann::json& payload = nlohmann::json::object(),
-                                         int maxRetries = 3);
+                                         int maxRetries = 3,
+                                         long timeoutSeconds = 30);
 
   /**
    * Low-level HTTP request function using libcurl.
@@ -84,12 +86,14 @@ private:
    * @param url Full request URL
    * @param payload JSON payload (only used for POST/PUT requests)
    * @param token Authorization token (optional, format: "Bearer <token>")
+   * @param timeoutSeconds Total timeout in seconds (default: 30)
    * @return JSON response (returns "data" field if present, otherwise full response)
    */
   static nlohmann::json HttpRequest(const std::string& method,
                                     const std::string& url,
                                     const nlohmann::json& payload = nlohmann::json::object(),
-                                    const std::string& token = "");
+                                    const std::string& token = "",
+                                    long timeoutSeconds = 30);
 
 private:
   static std::string base_url_;      ///< Base URL of the Hippo API server

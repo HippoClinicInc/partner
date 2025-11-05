@@ -55,6 +55,22 @@ String extractUploadDataName(const String& objectKey) {
     return uploadDataName;
 }
 
+// Extract file name from S3 objectKey
+// objectKey format: "patient/patientId/source_data/dataId/uploadDataName/filename"
+// Returns the filename extracted from the path (the last segment after the last slash)
+String extractFileName(const String& objectKey) {
+    String fileName = "";
+    
+    // Find the last slash
+    size_t lastSlash = objectKey.find_last_of('/');
+    if (lastSlash != String::npos && lastSlash < objectKey.length() - 1) {
+        // Extract the filename (everything after the last slash)
+        fileName = objectKey.substr(lastSlash + 1);
+    }
+    
+    return fileName;
+}
+
 // AsyncUploadManager::addUpload implementation
 String AsyncUploadManager::addUpload(const String& uploadId, const String& localFilePath, const String& s3ObjectKey, const String& patientId) {
     std::lock_guard<std::mutex> lock(mutex_);
