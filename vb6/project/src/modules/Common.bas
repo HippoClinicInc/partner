@@ -26,7 +26,7 @@ Public Enum FileOperationType
 End Enum
 
 ' S3 configuration constants (can be overridden by environment-specific modules if needed)
-Public Const S3_BUCKET As String = "hippoclinic"
+Public Const S3_BUCKET As String = "hippoclinic-staging"
 Public Const S3_REGION As String = "us-west-1"
 
 ' Allowed file extensions for REAL_TIME_SIGNAL_APPEND mode
