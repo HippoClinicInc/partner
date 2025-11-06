@@ -300,7 +300,6 @@ extern "C" {
 
 // Internal function declarations
 const char* InitializeAwsSDK();
-void CleanupUploadsByDataId(const String& dataId);
 
 // Backend API confirmation function
 bool ConfirmUploadRawFile(const String& dataId, 

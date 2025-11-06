@@ -256,9 +256,6 @@ void asyncUploadWorker(const String& uploadId,
                     manager.updateProgress(uploadId, CONFIRM_SUCCESS);
                     AWS_LOGSTREAM_INFO("S3Upload", "Confirmation SUCCESS for ID: " << uploadId);
                     
-                    // For REAL_TIME_APPEND mode (single file only), cleanup immediately after successful confirmation
-                    AWS_LOGSTREAM_INFO("S3Upload", "Cleaning up after successful confirmation for dataId: " << progress->dataId);
-                    CleanupUploadsByDataId(progress->dataId);
                 } else {
                     manager.updateProgress(uploadId, CONFIRM_FAILED);
                     AWS_LOGSTREAM_WARN("S3Upload", "Confirmation FAILED for ID: " << uploadId);
@@ -315,9 +312,6 @@ void asyncUploadWorker(const String& uploadId,
                     }
                     AWS_LOGSTREAM_INFO("S3Upload", "Backend confirmation SUCCESS for dataId: " << progress->dataId);
                     
-                    // Cleanup uploads after status has been updated to CONFIRM_SUCCESS
-                    // This ensures VB6 can query the final success status before cleanup
-                    CleanupUploadsByDataId(progress->dataId);
                 } else {
                     // Update all uploads to CONFIRM_FAILED
                     for (auto& upload : allUploads) {
@@ -604,54 +598,5 @@ extern "C" S3UPLOAD_API int __stdcall GetAsyncUploadStatusBytes(
         if (dataSize > bufferSize) dataSize = bufferSize;
         memcpy(buffer, errorJson.c_str(), dataSize);
         return dataSize;
-    }
-}
-
-// Clean up uploads by dataId - removes all uploads that match the dataId prefix
-// Returns JSON response indicating success or failure
-// Internal function to cleanup uploads by dataId
-// Called automatically after successful confirmation
-void CleanupUploadsByDataId(const String& dataId) {
-    // Step 1: Validate input parameters
-    if (dataId.empty()) {
-        AWS_LOGSTREAM_WARN("S3Upload", "CleanupUploadsByDataId called with empty dataId");
-        return;
-    }
-
-    try {
-        // Step 2: Get manager instance and find uploads by dataId
-        auto& manager = AsyncUploadManager::getInstance();
-        auto allUploads = manager.getAllUploadsByDataId(dataId);
-        
-        if (allUploads.empty()) {
-            // No uploads found with this dataId
-            AWS_LOGSTREAM_INFO("S3Upload", "No uploads found to cleanup for dataId: " << dataId);
-            return;
-        }
-
-        // Step 3: Remove all uploads that match the dataId
-        int removedCount = 0;
-        
-        // Get all upload IDs that match the dataId
-        std::vector<String> uploadIdsToRemove;
-        for (const auto& progress : allUploads) {
-            uploadIdsToRemove.push_back(progress->uploadId);
-        }
-        
-        // Remove each upload from the manager
-        for (const auto& uploadId : uploadIdsToRemove) {
-            manager.removeUpload(uploadId);
-            removedCount++;
-        }
-
-        // Step 4: Log cleanup completion
-        AWS_LOGSTREAM_INFO("S3Upload", "Successfully cleaned up " << removedCount << " upload(s) for dataId: " << dataId);
-
-    } catch (const std::exception& e) {
-        // Step 5: Handle exceptions during cleanup
-        AWS_LOGSTREAM_ERROR("S3Upload", "Exception during cleanup for dataId " << dataId << ": " << e.what());
-    } catch (...) {
-        // Step 6: Handle unknown exceptions
-        AWS_LOGSTREAM_ERROR("S3Upload", "Unknown exception during cleanup for dataId: " << dataId);
     }
 }
