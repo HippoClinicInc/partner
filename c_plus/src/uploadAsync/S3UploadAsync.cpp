@@ -235,11 +235,11 @@ void asyncUploadWorker(const String& uploadId,
         if (uploadSuccess) {
             AWS_LOGSTREAM_INFO("S3Upload", "Upload success, checking fileOperationType for ID: " << uploadId 
                               << ", fileOperationType: " << progress->fileOperationType 
-                              << " (REAL_TIME_SIGNAL_APPEND=" << REAL_TIME_SIGNAL_APPEND 
+                              << " (REAL_TIME_APPEND=" << REAL_TIME_APPEND
                               << ", BATCH_CREATE=" << BATCH_CREATE << ")");
             
-            // 17.0: If REAL_TIME_SIGNAL_APPEND, confirm immediately for this file
-            if (progress->fileOperationType == REAL_TIME_SIGNAL_APPEND) {
+            // 17.0: If REAL_TIME_APPEND, confirm immediately for this file
+            if (progress->fileOperationType == REAL_TIME_APPEND) {
                 // For incremental upload, use the actual file name instead of the folder name
                 String actualFileName = extractFileName(progress->s3ObjectKey);
                 bool incrementalConfirmSucceeded = ConfirmIncrementalUploadFile(
@@ -255,6 +255,10 @@ void asyncUploadWorker(const String& uploadId,
                 if (incrementalConfirmSucceeded) {
                     manager.updateProgress(uploadId, CONFIRM_SUCCESS);
                     AWS_LOGSTREAM_INFO("S3Upload", "Confirmation SUCCESS for ID: " << uploadId);
+                    
+                    // For REAL_TIME_APPEND mode (single file only), cleanup immediately after successful confirmation
+                    AWS_LOGSTREAM_INFO("S3Upload", "Cleaning up after successful confirmation for dataId: " << progress->dataId);
+                    CleanupUploadsByDataId(progress->dataId);
                 } else {
                     manager.updateProgress(uploadId, CONFIRM_FAILED);
                     AWS_LOGSTREAM_WARN("S3Upload", "Confirmation FAILED for ID: " << uploadId);
@@ -322,20 +326,6 @@ void asyncUploadWorker(const String& uploadId,
                         }
                     }
                     AWS_LOGSTREAM_WARN("S3Upload", "Backend confirmation FAILED for dataId: " << progress->dataId << " (uploads still successful)");
-                }
-            } else if (progress->fileOperationType == REAL_TIME_SIGNAL_APPEND && allFilesCompleted) {
-                // For real-time mode: if all files finished and all have been confirmed successfully, cleanup
-                bool allConfirmed = true;
-                for (auto& upload : allUploads) {
-                    if (!upload) continue;
-                    if (upload->status != CONFIRM_SUCCESS) {
-                        allConfirmed = false;
-                        break;
-                    }
-                }
-                if (allConfirmed) {
-                    AWS_LOGSTREAM_INFO("S3Upload", "All files confirmed via incremental API for dataId: " << progress->dataId);
-                    CleanupUploadsByDataId(progress->dataId);
                 }
             }
         }
@@ -426,11 +416,11 @@ extern "C" S3UPLOAD_API const char* __stdcall UploadFileAsync(
 
         // Save operation type to progress
         if (auto uploadProgress = manager.getUpload(uploadId)) {
-            uploadProgress->fileOperationType = (fileOperationType == REAL_TIME_SIGNAL_APPEND) ? REAL_TIME_SIGNAL_APPEND : BATCH_CREATE;
+            uploadProgress->fileOperationType = (fileOperationType == REAL_TIME_APPEND) ? REAL_TIME_APPEND: BATCH_CREATE;
             AWS_LOGSTREAM_INFO("S3Upload", "Setting fileOperationType for uploadId: " << uploadId 
                               << ", input fileOperationType: " << fileOperationType 
                               << ", set to: " << uploadProgress->fileOperationType
-                              << " (REAL_TIME_SIGNAL_APPEND=" << REAL_TIME_SIGNAL_APPEND 
+                              << " (REAL_TIME_APPEND=" << REAL_TIME_APPEND
                               << ", BATCH_CREATE=" << BATCH_CREATE << ")");
         } else {
             AWS_LOGSTREAM_ERROR("S3Upload", "Failed to get upload progress for uploadId: " << uploadId);

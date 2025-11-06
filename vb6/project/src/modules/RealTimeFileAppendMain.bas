@@ -2,7 +2,7 @@ Attribute VB_Name = "RealTimeFileAppendMain"
 Option Explicit
 
 ' NOTE: The overall flow is the same as in `BatchMain.bas`.
-' - The only difference: the upload interface here uses FileOperationType as REAL_TIME_SIGNAL_APPEND (real-time incremental append).
+' - The only difference: the upload interface here uses FileOperationType as REAL_TIME_APPEND(real-time incremental append).
 ' - In batch scenarios (`BatchMain.bas`), BATCH_CREATE is used.
 
 ' Required references:
@@ -60,8 +60,8 @@ Public Sub Main()
 
     ' 2. Check if the path is a folder (not supported for real-time append)
     If IsPathFolder(uploadFilePath) Then
-        Debug.Print "ERROR: Folder upload is not supported for REAL_TIME_SIGNAL_APPEND mode"
-        MsgBox "ERROR: Folder upload is not supported for REAL_TIME_SIGNAL_APPEND mode. Please provide a single file path.", vbCritical, "Folder Not Supported"
+        Debug.Print "ERROR: Folder upload is not supported for REAL_TIME_APPEND mode"
+        MsgBox "ERROR: Folder upload is not supported for REAL_TIME_APPEND mode. Please provide a single file path.", vbCritical, "Folder Not Supported"
         Exit Sub
     End If
 
@@ -118,7 +118,7 @@ Public Sub Main()
     ' S3 file key: patient/patientId/source_data/dataId/abc.ds/abc.ds
     s3FileKey = "patient/" & patientId & "/source_data/" & dataId & "/" & uploadDataName & "/" & uploadDataName
     Dim singleUploadId As String
-    uploadSuccess = UploadSingleFile(uploadFilePath, s3FileKey, dataId, patientId, REAL_TIME_SIGNAL_APPEND, singleUploadId)
+    uploadSuccess = UploadSingleFile(uploadFilePath, s3FileKey, dataId, patientId, REAL_TIME_APPEND, singleUploadId)
 
     ' 7. Monitor single file upload status
     If uploadSuccess Then

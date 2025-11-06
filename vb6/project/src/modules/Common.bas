@@ -22,7 +22,7 @@ End Enum
 ' Keep in sync with C++ enum FileOperationType
 Public Enum FileOperationType
     BATCH_CREATE = 0
-    REAL_TIME_SIGNAL_APPEND = 1
+    REAL_TIME_APPEND= 1
 End Enum
 
 ' S3 configuration constants
@@ -34,8 +34,8 @@ Public Const S3_REGION As String = "us-west-1"
 ' Windows API declarations (used by monitoring loops)
 Public Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
 
-' Upload all files in a folder to S3 and confirm with API (uses fileOperationType)
-Public Function UploadFolderContents(ByVal folderPath As String, ByRef totalFileSize As Long, ByVal s3FileKey As String, ByVal dataId As String, ByVal patientId As String, ByVal fileOperationType As Long, ByRef uploadIds As String) As Boolean
+' Upload all files in a folder to S3 and confirm with API (BATCH_CREATE mode only)
+Public Function UploadFolderContents(ByVal folderPath As String, ByRef totalFileSize As Long, ByVal s3FileKey As String, ByVal dataId As String, ByVal patientId As String, ByRef uploadIds As String) As Boolean
     Dim fileSystem As Object
     Dim folder As Object
     Dim currentFileObject As Object
@@ -69,13 +69,13 @@ Public Function UploadFolderContents(ByVal folderPath As String, ByRef totalFile
     totalFileSize = 0
     uploadIds = ""
 
-    ' Upload all files in the folder
+    ' Upload all files in the folder (using BATCH_CREATE mode)
     For Each currentFileObject In folder.Files
         currentFile = currentFileObject.Path
         currentFileSize = GetLocalFileSize(currentFile)
 
         singleS3FileKey = s3FileKey & GetFileName(currentFile)
-        If UploadSingleFile(currentFile, singleS3FileKey, dataId, patientId, fileOperationType, currentUploadId) Then
+        If UploadSingleFile(currentFile, singleS3FileKey, dataId, patientId, BATCH_CREATE, currentUploadId) Then
             uploadedCount = uploadedCount + 1
             totalFileSize = totalFileSize + currentFileSize
             If uploadIds = "" Then

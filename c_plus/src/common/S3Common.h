@@ -100,9 +100,13 @@ namespace ErrorMessage {
 String formatErrorMessage(const String& baseMessage, const String& detail = "");
 
 // File operation type - determines backend confirmation strategy
+// This mimic the FileOperationType in
+// https://github.com/HippoClinicInc/schema/blob/0feb41d77b02661e5efe7bb2e42d251cb9659345/hippo/web/file_io.proto#L110
 enum FileOperationType {
     BATCH_CREATE = 0,
-    REAL_TIME_SIGNAL_APPEND = 1
+    // We do not differentiate between REAL_TIME_SIGNAL_APPEND and REAL_TIME_VIDEO_APPEND.
+    // We combine both to be REAL_TIME_APPEND.
+    REAL_TIME_APPEND= 1
 };
 
 // Upload status enumeration - defines possible states of an async upload

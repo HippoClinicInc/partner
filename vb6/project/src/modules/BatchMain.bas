@@ -95,7 +95,7 @@ Sub Main()
         ' S3 file key: patient/patientId/source_data/dataId/abc.ds/
         s3FileKey = "patient/" & patientId & "/source_data/" & dataId & "/" & uploadDataName & "/"
         Dim uploadIds As String
-        uploadSuccess = UploadFolderContents(uploadFilePath, totalFileSize, s3FileKey, dataId, patientId, BATCH_CREATE, uploadIds)
+        uploadSuccess = UploadFolderContents(uploadFilePath, totalFileSize, s3FileKey, dataId, patientId, uploadIds)
 
         ' 6.1.1. Monitor folder upload status
         If uploadSuccess Then
