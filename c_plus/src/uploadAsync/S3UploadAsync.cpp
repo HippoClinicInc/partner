@@ -8,10 +8,6 @@ static std::atomic<bool> g_isUploading(false);
 static std::atomic<int> g_activeUploads(0);
 static const int MAX_CONCURRENT_UPLOADS = 1;  // Only allow one upload at a time
 
-// Global confirmation lock - ensures only one confirmation request runs at a time for REAL_TIME_SIGNAL_APPEND
-// This prevents backend dataId lock conflicts when multiple files are uploaded to the same dataId
-static std::mutex g_confirmMutex;
-
 // Async upload worker thread function
 // This function runs in a separate thread to handle file upload to S3
 void asyncUploadWorker(const String& uploadId,
@@ -244,13 +240,6 @@ void asyncUploadWorker(const String& uploadId,
             
             // 17.0: If REAL_TIME_SIGNAL_APPEND, confirm immediately for this file
             if (progress->fileOperationType == REAL_TIME_SIGNAL_APPEND) {
-                // Use confirmation lock to serialize confirmation requests
-                // This prevents backend dataId lock conflicts
-                AWS_LOGSTREAM_INFO("S3Upload", "Waiting for confirmation lock for ID: " << uploadId << ", dataId: " << progress->dataId);
-                std::lock_guard<std::mutex> confirmLock(g_confirmMutex);
-                
-                AWS_LOGSTREAM_INFO("S3Upload", "Acquired confirmation lock for ID: " << uploadId << ", dataId: " << progress->dataId);
-                
                 // For incremental upload, use the actual file name instead of the folder name
                 String actualFileName = extractFileName(progress->s3ObjectKey);
                 bool incrementalConfirmSucceeded = ConfirmIncrementalUploadFile(
@@ -270,8 +259,6 @@ void asyncUploadWorker(const String& uploadId,
                     manager.updateProgress(uploadId, CONFIRM_FAILED);
                     AWS_LOGSTREAM_WARN("S3Upload", "Confirmation FAILED for ID: " << uploadId);
                 }
-                
-                AWS_LOGSTREAM_INFO("S3Upload", "Released confirmation lock for ID: " << uploadId << ", dataId: " << progress->dataId);
             }
             
             // Step 15.1: Check if this is the last file in a folder upload

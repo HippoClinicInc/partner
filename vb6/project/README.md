@@ -38,16 +38,15 @@ project/
 - `UploadFolderContents()` - Batch upload entire folders
 
 #### `RealTimeFileAppendMain.bas`
-**Real-Time File Append Upload Module** - Handles real-time file append upload workflow:
-- **Real-Time Monitoring** - Monitor file changes and upload new content in real-time
-- **Incremental Upload** - Upload only the newly appended portions of files
-- **Resume Support** - Support resuming uploads from interruption points
+**Real-Time File Append Upload Module** - Handles real-time incremental append upload workflow:
+- **Single File Upload** - Only supports uploading individual files (folders are not supported)
+- **New or Append Mode** - Choose to create a new dataId or append to an existing dataId
+- **Immediate Confirmation** - Each file upload is immediately confirmed after completion
 
 **Key Functions:**
-- `RealTimeFileAppendUpload()` - Main function for real-time file append upload
-- Monitor file size changes
-- Upload incremental data only
-- Maintain upload state and offset positions
+- `Main()` - Primary workflow entry point for real-time append upload
+- Supports two modes: create new dataId or append to existing dataId
+- Only single file uploads (folder upload is not supported for this mode)
 
 #### `Common.bas`
 **Common Utilities Module** - Contains shared functions and utilities used across modules:
@@ -148,8 +147,8 @@ This project includes two separate VB6 project files for different upload scenar
 ### `Project2.vbp` - Real-Time File Append Scenario
 - **Main Module**: RealTimeFileAppendMain.bas
 - **Purpose**: Real-time incremental file append upload
-- **Use Case**: Monitor and upload file changes in real-time
-- **Features**: Incremental upload, resume support, offset management
+- **Use Case**: Upload single files with option to create new or append to existing dataId
+- **Features**: Single file upload only (folder upload not supported), immediate confirmation after upload
 
 > **Note**: Both projects share the same common modules (Common.bas, HippoBackend.bas, FileLib.bas, S3UploadLib.bas, JsonConverter.bas, DllPathManager.bas) but have different entry points.
 
@@ -284,7 +283,9 @@ Public Const S3_REGION As String = "us-west-1"
    - Upload file to S3
    - Confirm upload with API
 
-#### Folder Upload
+#### Folder Upload (BatchMain.bas only)
+> **Note**: Folder upload is only supported in `BatchMain.bas` (BATCH_CREATE mode). `RealTimeFileAppendMain.bas` does not support folder uploads.
+
 1. Run the application
 2. Enter folder path when prompted
 3. System will:
@@ -295,15 +296,19 @@ Public Const S3_REGION As String = "us-west-1"
 
 ### Real-Time File Append Mode (RealTimeFileAppendMain.bas)
 
-#### Incremental File Upload
+#### Single File Upload (New or Append)
+> **Note**: This mode only supports single file uploads. Folder uploads are not supported.
+
 1. Run the real-time upload function
-2. Specify the file to monitor
-3. System will:
-   - Monitor file size changes
-   - Upload only new appended data
-   - Maintain upload offset position
-   - Support resume from interruption
-   - Confirm incremental uploads with API
+2. Enter the file path to upload
+3. If the path is a folder, an error will be shown
+4. Choose upload mode:
+   - **Mode 1 (New)**: Create a new dataId for this file
+   - **Mode 2 (Append)**: Append to an existing dataId (you'll be prompted to enter the dataId)
+5. System will:
+   - Upload the file to S3
+   - Immediately confirm the upload with the backend API
+   - Display upload status and results
 
 ## 🐛 Debugging
 

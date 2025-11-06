@@ -25,7 +25,6 @@ Public Sub Main()
     Dim patientId As String
     Dim dataId As String
     Dim uploadFilePath As String
-    Dim isFolder As Boolean
     Dim uploadSuccess As Boolean
     Dim uploadDataName As String
     Dim totalFileSize As Long
@@ -59,53 +58,49 @@ Public Sub Main()
         Exit Sub
     End If
 
-    ' 2. Create patient record (token managed internally)
+    ' 2. Check if the path is a folder (not supported for real-time append)
+    If IsPathFolder(uploadFilePath) Then
+        Debug.Print "ERROR: Folder upload is not supported for REAL_TIME_SIGNAL_APPEND mode"
+        MsgBox "ERROR: Folder upload is not supported for REAL_TIME_SIGNAL_APPEND mode. Please provide a single file path.", vbCritical, "Folder Not Supported"
+        Exit Sub
+    End If
+
+    ' 3. Create patient record (token managed internally)
     If Not CreatePatient(patientId) Then
         Debug.Print "ERROR: Failed to create patient"
         Exit Sub
     End If
 
-    ' 3. Determine if upload is folder or single file
-    isFolder = IsPathFolder(uploadFilePath)
+    ' 4. Ask user to choose between new or append mode
+    Dim userChoice As String
+    userChoice = InputBox("Please choose upload mode:" & vbCrLf & _
+                          "1 - New (create new dataId)" & vbCrLf & _
+                          "2 - Append (use existing dataId)", _
+                          "Upload Mode", "1")
     
-    ' 3.1. For single file upload, ask user to choose between new or append
-    If Not isFolder Then
-        Dim userChoice As String
-        userChoice = InputBox("Please choose upload mode:" & vbCrLf & _
-                              "1 - New (create new dataId)" & vbCrLf & _
-                              "2 - Append (use existing dataId)", _
-                              "Upload Mode", "1")
-        
-        If userChoice = "" Then
-            Debug.Print "ERROR: User cancelled upload mode selection"
+    If userChoice = "" Then
+        Debug.Print "ERROR: User cancelled upload mode selection"
+        Exit Sub
+    End If
+    
+    If userChoice = "2" Then
+        ' 4.1. Append mode: ask user to input existing dataId
+        dataId = InputBox("Please enter the existing dataId to append:", "Append Mode", "")
+        dataId = Trim(dataId)
+        If dataId = "" Then
+            Debug.Print "ERROR: No dataId provided for append mode"
             Exit Sub
         End If
-        
-        If userChoice = "2" Then
-            ' 3.1.1. Append mode: ask user to input existing dataId
-            dataId = InputBox("Please enter the existing dataId to append:", "Append Mode", "")
-            dataId = Trim(dataId)
-            If dataId = "" Then
-                Debug.Print "ERROR: No dataId provided for append mode"
-                Exit Sub
-            End If
-            Debug.Print "Using existing dataId for append: " & dataId
-        Else
-            ' 3.1.2. New mode: generate new dataId (default behavior)
-            If Not GenerateDataId(dataId) Then
-                Debug.Print "ERROR: Failed to generate data ID"
-                Exit Sub
-            End If
-        End If
+        Debug.Print "Using existing dataId for append: " & dataId
     Else
-        ' 3.2. Folder upload: always generate new dataId
+        ' 4.2. New mode: generate new dataId (default behavior)
         If Not GenerateDataId(dataId) Then
             Debug.Print "ERROR: Failed to generate data ID"
             Exit Sub
         End If
     End If
 
-    ' 4. Set credentials and initialize AWS SDK
+    ' 5. Set credentials and initialize AWS SDK
     sdkInitResult = SetCredential(ENV_URL, LOGIN_ACCOUNT, LOGIN_ACCOUNT_PASSWORD)
     Dim jsonResponse As Object
     Set jsonResponse = JsonConverter.ParseJson(sdkInitResult)
@@ -117,50 +112,22 @@ Public Sub Main()
     Dim maxWaitTime As Long
     maxWaitTime = 600 ' Maximum wait time in seconds (10 minutes)
 
-    If isFolder Then
-        ' 5.1. Upload folder contents
-        ' 5.1.1. Validate folder contents first
-        Dim validationError As String
-        If Not ValidateFolderContents(uploadFilePath, validationError) Then
-            Debug.Print "ERROR: Folder validation failed - " & validationError
-            MsgBox "ERROR: " & validationError, vbCritical, "Folder Validation Failed"
-            Exit Sub
-        End If
-        
-        Dim fso As Object
-        Set fso = CreateObject("Scripting.FileSystemObject")
-        ' Upload data name: abc.ds
-        uploadDataName = fso.GetFolder(uploadFilePath).Name
-        ' S3 file key: patient/patientId/source_data/dataId/abc.ds/
-        s3FileKey = "patient/" & patientId & "/source_data/" & dataId & "/" & uploadDataName & "/"
-        Dim uploadIds As String
-        uploadSuccess = UploadFolderContents(uploadFilePath, totalFileSize, s3FileKey, dataId, patientId, REAL_TIME_SIGNAL_APPEND, uploadIds)
+    ' 6. Upload single file
+    ' Upload data name: abc.ds
+    uploadDataName = GetFileName(uploadFilePath)
+    ' S3 file key: patient/patientId/source_data/dataId/abc.ds/abc.ds
+    s3FileKey = "patient/" & patientId & "/source_data/" & dataId & "/" & uploadDataName & "/" & uploadDataName
+    Dim singleUploadId As String
+    uploadSuccess = UploadSingleFile(uploadFilePath, s3FileKey, dataId, patientId, REAL_TIME_SIGNAL_APPEND, singleUploadId)
 
-        ' 5.1.1. Monitor folder upload status
-        If uploadSuccess Then
-            Debug.Print
-            Debug.Print "2. All folder uploads submitted (real-time), monitoring status..."
-            Debug.Print
-            uploadSuccess = MonitorMultipleUploadStatus(dataId, maxWaitTime)
-        End If
-    Else
-        ' 5.2. Upload single file
-        ' Upload data name: abc.ds
-        uploadDataName = GetFileName(uploadFilePath)
-        ' S3 file key: patient/patientId/source_data/dataId/abc.ds/abc.ds
-        s3FileKey = "patient/" & patientId & "/source_data/" & dataId & "/" & uploadDataName & "/" & uploadDataName
-        Dim singleUploadId As String
-        uploadSuccess = UploadSingleFile(uploadFilePath, s3FileKey, dataId, patientId, REAL_TIME_SIGNAL_APPEND, singleUploadId)
-
-        ' 5.2.1. Monitor single file upload status
-        If uploadSuccess Then
-            totalFileSize = GetLocalFileSize(uploadFilePath)
-            Debug.Print "Single file upload started (real-time), monitoring status..."
-            uploadSuccess = MonitorUploadStatus(dataId, maxWaitTime)
-        End If
+    ' 7. Monitor single file upload status
+    If uploadSuccess Then
+        totalFileSize = GetLocalFileSize(uploadFilePath)
+        Debug.Print "Single file upload started (real-time), monitoring status..."
+        uploadSuccess = MonitorUploadStatus(dataId, maxWaitTime)
     End If
 
-    ' 6. Upload process completed (confirmation and cleanup are handled automatically by C++ backend)
+    ' 8. Upload process completed (confirmation and cleanup are handled automatically by C++ backend)
     If uploadSuccess Then
         Debug.Print "SUCCESS: Real-time upload completed and confirmed"
         MsgBox "SUCCESS: Real-time upload completed"
