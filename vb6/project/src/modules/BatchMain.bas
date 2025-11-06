@@ -15,6 +15,8 @@ Option Explicit
 ' - HippoBackend.bas
 ' - FileLib.bas
 ' - Common.bas
+' - BatchMain.bas
+' - DllPathManager.bas
 
 ' S3 configuration constants moved to Common.bas
 
