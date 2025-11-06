@@ -99,6 +99,16 @@ namespace ErrorMessage {
 // Format error message helper function
 String formatErrorMessage(const String& baseMessage, const String& detail = "");
 
+// File operation type - determines backend confirmation strategy
+// This mimic the FileOperationType in
+// https://github.com/HippoClinicInc/schema/blob/0feb41d77b02661e5efe7bb2e42d251cb9659345/hippo/web/file_io.proto#L110
+enum FileOperationType {
+    BATCH_CREATE = 0,
+    // We do not differentiate between REAL_TIME_SIGNAL_APPEND and REAL_TIME_VIDEO_APPEND.
+    // We combine both to be REAL_TIME_APPEND.
+    REAL_TIME_APPEND= 1
+};
+
 // Upload status enumeration - defines possible states of an async upload
 enum UploadStatus {
     // Upload is waiting to start
@@ -149,8 +159,11 @@ struct AsyncUploadProgress {
     String patientId;
     bool confirmationAttempted;
 
+    // Operation mode
+    FileOperationType fileOperationType;
+
     // Constructor - initialize with default values
-    AsyncUploadProgress() : status(UPLOAD_PENDING), totalSize(0), shouldCancel(false), confirmationAttempted(false) {}
+    AsyncUploadProgress() : status(UPLOAD_PENDING), totalSize(0), shouldCancel(false), confirmationAttempted(false), fileOperationType(BATCH_CREATE) {}
 };
 
 // Async upload manager class - thread-safe singleton for managing multiple uploads
@@ -273,6 +286,11 @@ String getUploadId(const String& dataId, long long timestamp);
 // Returns the uploadDataName extracted from the path
 String extractUploadDataName(const String& objectKey);
 
+// Extract file name from S3 objectKey
+// objectKey format: "patient/patientId/source_data/dataId/uploadDataName/filename"
+// Returns the filename extracted from the path (the last segment after the last slash)
+String extractFileName(const String& objectKey);
+
 // AWS SDK management functions (extern "C" declarations)
 extern "C" {
     S3UPLOAD_API int __stdcall FileExists(const char* filePath);
@@ -288,6 +306,11 @@ void CleanupUploadsByDataId(const String& dataId);
 bool ConfirmUploadRawFile(const String& dataId, 
                          const String& uploadDataName, const String& patientId, 
                          long long uploadFileSizeBytes, const String& s3ObjectKey);
+
+// Backend API incremental confirmation function
+bool ConfirmIncrementalUploadFile(const String& dataId,
+                                  const String& uploadDataName, const String& patientId,
+                                  long long uploadFileSizeBytes, const String& s3ObjectKey);
 
 // S3 client creation helper
 Aws::S3::S3Client createS3Client(const String& accessKey,

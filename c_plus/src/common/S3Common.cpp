@@ -55,6 +55,22 @@ String extractUploadDataName(const String& objectKey) {
     return uploadDataName;
 }
 
+// Extract file name from S3 objectKey
+// objectKey format: "patient/patientId/source_data/dataId/uploadDataName/filename"
+// Returns the filename extracted from the path (the last segment after the last slash)
+String extractFileName(const String& objectKey) {
+    String fileName = "";
+    
+    // Find the last slash
+    size_t lastSlash = objectKey.find_last_of('/');
+    if (lastSlash != String::npos && lastSlash < objectKey.length() - 1) {
+        // Extract the filename (everything after the last slash)
+        fileName = objectKey.substr(lastSlash + 1);
+    }
+    
+    return fileName;
+}
+
 // AsyncUploadManager::addUpload implementation
 String AsyncUploadManager::addUpload(const String& uploadId, const String& localFilePath, const String& s3ObjectKey, const String& patientId) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -213,6 +229,52 @@ bool ConfirmUploadRawFile(const String& dataId,
         return false;
     } catch (...) {
         AWS_LOGSTREAM_ERROR("S3Upload", "Unknown exception in ConfirmUploadRawFile");
+        return false;
+    }
+}
+
+// Backend API incremental confirmation function
+bool ConfirmIncrementalUploadFile(const String& dataId,
+                                  const String& uploadDataName, const String& patientId,
+                                  long long uploadFileSizeBytes, const String& s3ObjectKey) {
+    try {
+        // Build JSON payload (same shape as ConfirmUploadRawFile)
+        nlohmann::json payload;
+        payload["dataId"] = dataId;
+        payload["dataName"] = uploadDataName;
+        payload["fileName"] = s3ObjectKey;
+        payload["dataSize"] = uploadFileSizeBytes;
+        payload["patientId"] = patientId;
+        payload["dataType"] = 20;
+        payload["uploadDataName"] = uploadDataName;
+        payload["isRawDataInternal"] = 1;
+        payload["dataVersions"] = nlohmann::json::array({0});
+
+        // Call incremental confirm API
+        nlohmann::json response = HippoClient::ConfirmIncrementalUploadFile(payload);
+        AWS_LOGSTREAM_INFO("S3Upload", "Incremental confirmation response: " << response.dump(2));
+
+        // Success criteria: { "status": { "code": "OK", "message": "OK" }}
+        if (response.contains("status") && response["status"].is_object()) {
+            auto status = response["status"];
+            if (status.contains("code") && status["code"].is_string() &&
+                status.contains("message") && status["message"].is_string()) {
+                String code = status["code"].get<String>();
+                String message = status["message"].get<String>();
+                if (code == "OK" && message == "OK") {
+                    AWS_LOGSTREAM_INFO("S3Upload", "Incremental confirmation OK for dataId: " << dataId << ", file: " << s3ObjectKey);
+                    return true;
+                }
+            }
+        }
+
+        AWS_LOGSTREAM_WARN("S3Upload", "Incremental confirmation NOT OK for dataId: " << dataId << ", file: " << s3ObjectKey);
+        return false;
+    } catch (const std::exception& e) {
+        AWS_LOGSTREAM_ERROR("S3Upload", "Exception in ConfirmIncrementalUploadFile: " << e.what());
+        return false;
+    } catch (...) {
+        AWS_LOGSTREAM_ERROR("S3Upload", "Unknown exception in ConfirmIncrementalUploadFile");
         return false;
     }
 }

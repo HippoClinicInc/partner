@@ -39,7 +39,8 @@ Declare Function UploadFileAsync Lib "S3UploadLib.dll" ( _
     ByVal objectKey As String, _
     ByVal localFilePath As String, _
     ByVal dataId As String, _
-    ByVal patientId As String _
+    ByVal patientId As String, _
+    ByVal fileOperationType As Long _
 ) As String
 
 ' Get upload status as byte array (safer for large responses)
