@@ -55,5 +55,3 @@ Declare Function GetAsyncUploadStatusBytes Lib "S3UploadLib.dll" ( _
     ByVal bufferSize As Long _
 ) As Long
 
-' Note: CleanupUploadsByDataId is now called automatically after successful confirmation
-' No need to call it manually from VB6

@@ -34,7 +34,7 @@ json HippoClient::ConfirmUploadRawFile(const json& rawDeviceData) {
 
 json HippoClient::ConfirmIncrementalUploadFile(const json& payload) {
     std::string url = base_url_ + "/hippo/thirdParty/file/confirmIncrementalUploadFile";
-    json response = RequestWithToken("POST", url, payload, 3, 300);
+    json response = RequestWithToken("POST", url, payload);
     std::cout << "[confirm_incremental_upload_file] response:\n" << response.dump(2) << std::endl;
     return response;
 }

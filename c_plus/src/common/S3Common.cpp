@@ -9,6 +9,10 @@ String g_apiUrl = "";
 String g_email = "";
 String g_password = "";
 
+// Upload cleanup configuration
+// 3 days = 3 * 24 * 60 * 60 * 1000000 = 259200000000 microseconds
+static const long long THREE_DAYS_IN_MICROSECONDS = 259200000000LL;
+
 String create_response(int code, const String& message) {
     std::ostringstream oss;
     oss << "{"
@@ -74,6 +78,47 @@ String extractFileName(const String& objectKey) {
 // AsyncUploadManager::addUpload implementation
 String AsyncUploadManager::addUpload(const String& uploadId, const String& localFilePath, const String& s3ObjectKey, const String& patientId) {
     std::lock_guard<std::mutex> lock(mutex_);
+    
+    // Step 1: Clean up uploads older than 3 days
+    // Get current timestamp
+    auto now = std::chrono::high_resolution_clock::now();
+    auto currentTimestamp = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+    
+    // Iterate through all uploads and remove those older than 3 days
+    std::vector<String> uploadsToRemove;
+    for (const auto& pair : uploads_) {
+        const String& existingUploadId = pair.first;
+        
+        // Extract timestamp from uploadId (format: "dataId_timestamp")
+        size_t separatorPos = existingUploadId.find(UPLOAD_ID_SEPARATOR);
+        if (separatorPos != String::npos && separatorPos < existingUploadId.length() - 1) {
+            String timestampStr = existingUploadId.substr(separatorPos + UPLOAD_ID_SEPARATOR.length());
+            try {
+                long long uploadTimestamp = std::stoll(timestampStr);
+                
+                // Check if upload is older than 3 days
+                if (currentTimestamp - uploadTimestamp > THREE_DAYS_IN_MICROSECONDS) {
+                    uploadsToRemove.push_back(existingUploadId);
+                    AWS_LOGSTREAM_INFO("S3Upload", "Marking upload for cleanup (older than 3 days): " << existingUploadId);
+                }
+            } catch (const std::exception& e) {
+                // If timestamp parsing fails, log warning but continue
+                AWS_LOGSTREAM_WARN("S3Upload", "Failed to parse timestamp from uploadId: " << existingUploadId << ", error: " << e.what());
+            }
+        }
+    }
+    
+    // Remove old uploads
+    for (const auto& uploadIdToRemove : uploadsToRemove) {
+        uploads_.erase(uploadIdToRemove);
+        AWS_LOGSTREAM_INFO("S3Upload", "Cleaned up old upload: " << uploadIdToRemove);
+    }
+    
+    if (!uploadsToRemove.empty()) {
+        AWS_LOGSTREAM_INFO("S3Upload", "Cleaned up " << uploadsToRemove.size() << " upload(s) older than 3 days");
+    }
+    
+    // Step 2: Add new upload
     auto progress = std::make_shared<AsyncUploadProgress>();
     progress->uploadId = uploadId;
     progress->localFilePath = localFilePath;

@@ -152,14 +152,12 @@ Public Function MonitorUploadStatus(ByVal dataId As String, ByVal maxWaitTime As
     Dim waitTime As Long
     Dim statusCode As Long
     Dim uploadStatus As Long
-    Dim hasSeenValidStatus As Boolean
     Dim buffer(0 To 2097151) As Byte
     Dim bytesReceived As Long
     Dim byteIndex As Long
     Dim sleepCounter As Integer
 
     waitTime = 0
-    hasSeenValidStatus = False
 
     Do While waitTime < maxWaitTime
         Debug.Print "Query status for dataId: " & dataId & " (attempt " & (waitTime + 1) & ")"
@@ -192,7 +190,6 @@ ParseResponse:
 
         If statusCode = UPLOAD_SUCCESS Then
             uploadStatus = statusObj("status")
-            hasSeenValidStatus = True
 
             If uploadStatus = CONFIRM_SUCCESS Then
                 isCompleted = True
@@ -209,15 +206,9 @@ ParseResponse:
                 Exit Do
             End If
         ElseIf statusCode = UPLOAD_FAILED Then
-            If hasSeenValidStatus Then
-                Debug.Print "INFO: Upload task has been cleaned up (likely completed successfully)"
-                isCompleted = True
-                Exit Do
-            Else
-                isError = True
-                Debug.Print "ERROR: Upload task not found - " & statusObj("message")
-                Exit Do
-            End If
+            isError = True
+            Debug.Print "ERROR: Upload task not found - " & statusObj("message")
+            Exit Do
         Else
             isError = True
             Debug.Print "ERROR: Failed to get upload status - " & statusObj("message")
