@@ -80,9 +80,9 @@ String AsyncUploadManager::addUpload(const String& uploadId, const String& local
     std::lock_guard<std::mutex> lock(mutex_);
     
     // Step 1: Clean up uploads older than 3 days
-    // Get current timestamp
-    auto now = std::chrono::high_resolution_clock::now();
-    auto currentTimestamp = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+    // Get current timestamp in microseconds
+    auto nowTimePoint = std::chrono::high_resolution_clock::now();
+    auto currentTimestampMicroseconds = std::chrono::duration_cast<std::chrono::microseconds>(nowTimePoint.time_since_epoch()).count();
     
     // Iterate through all uploads and remove those older than 3 days
     std::vector<String> uploadsToRemove;
@@ -94,10 +94,13 @@ String AsyncUploadManager::addUpload(const String& uploadId, const String& local
         if (separatorPos != String::npos && separatorPos < existingUploadId.length() - 1) {
             String timestampStr = existingUploadId.substr(separatorPos + UPLOAD_ID_SEPARATOR.length());
             try {
-                long long uploadTimestamp = std::stoll(timestampStr);
+                long long uploadTimestampMicroseconds = std::stoll(timestampStr);
+                
+                // Calculate time difference in microseconds
+                long long timeDiffMicroseconds = currentTimestampMicroseconds - uploadTimestampMicroseconds;
                 
                 // Check if upload is older than 3 days
-                if (currentTimestamp - uploadTimestamp > THREE_DAYS_IN_MICROSECONDS) {
+                if (timeDiffMicroseconds > THREE_DAYS_IN_MICROSECONDS) {
                     uploadsToRemove.push_back(existingUploadId);
                     AWS_LOGSTREAM_INFO("S3Upload", "Marking upload for cleanup (older than 3 days): " << existingUploadId);
                 }
