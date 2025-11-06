@@ -17,6 +17,8 @@ Option Explicit
 ' - HippoBackend.bas
 ' - FileLib.bas
 ' - Common.bas
+' - DllPathManager.bas
+' - RealTimeFileAppendMain.bas
 
 ' S3 configuration constants are maintained centrally in Common.bas
 
