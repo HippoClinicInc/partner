@@ -25,8 +25,10 @@ Public Enum FileOperationType
     REAL_TIME_SIGNAL_APPEND = 1
 End Enum
 
-' S3 configuration constants (can be overridden by environment-specific modules if needed)
-Public Const S3_BUCKET As String = "hippoclinic"
+' S3 configuration constants
+' For prod running, do not change it here. In our current prod settings,
+' the prod bucket is called "hippoclinic-staging". We will change it later.
+Public Const S3_BUCKET As String = "hippoclinic-staging"
 Public Const S3_REGION As String = "us-west-1"
 
 ' Windows API declarations (used by monitoring loops)
