@@ -1,5 +1,6 @@
 #include "../common/S3Common.h"
 #include "../common/request/s3_client_manager.h"
+#include <queue>
 
 // Global queue processing control - ensures only one upload runs at a time
 static std::mutex g_uploadMutex;
@@ -8,8 +9,30 @@ static std::atomic<bool> g_isUploading(false);
 static std::atomic<int> g_activeUploads(0);
 static const int MAX_CONCURRENT_UPLOADS = 1;  // Only allow one upload at a time
 
-// Async upload worker thread function
-// This function runs in a separate thread to handle file upload to S3
+// Global upload task queue structure
+struct UploadTask {
+    String uploadId;
+    String region;
+    String bucketName;
+    String objectKey;
+    String localFilePath;
+    String dataId;
+    String patientId;
+};
+
+// Global upload queue and worker thread management
+static std::queue<UploadTask> g_uploadQueue;
+static std::mutex g_queueMutex;
+static std::condition_variable g_queueCondition;
+static std::atomic<bool> g_workerRunning(false);
+static std::atomic<bool> g_shouldShutdown(false);
+static std::thread g_workerThread;
+static std::mutex g_workerThreadMutex;
+static std::chrono::steady_clock::time_point g_lastHeartbeat;
+static std::mutex g_heartbeatMutex;
+
+// Upload processing function
+// This function handles the actual file upload to S3, called by the worker thread
 void asyncUploadWorker(const String& uploadId,
                       const String& region,
                       const String& bucketName,
@@ -24,18 +47,7 @@ void asyncUploadWorker(const String& uploadId,
     if (!progress) return;
 
     try {
-        // Step 2: Wait for queue - ensure only one upload runs at a time
-        std::unique_lock<std::mutex> lock(g_uploadMutex);
-        g_uploadCondition.wait(lock, [] { 
-            return g_activeUploads.load() < MAX_CONCURRENT_UPLOADS; 
-        });
-        
-        // Increment active uploads counter
-        g_activeUploads++;
-        g_isUploading = true;
-        lock.unlock();
-        
-        // Step 3: Initialize upload progress and set status to uploading
+        // Step 2: Initialize upload progress and set status to uploading
         progress->startTime = std::chrono::steady_clock::now();
         manager.updateProgress(uploadId, UPLOAD_UPLOADING);
 
@@ -222,15 +234,7 @@ void asyncUploadWorker(const String& uploadId,
             AWS_LOGSTREAM_ERROR("S3Upload", "Async upload FAILED for ID: " << uploadId << " after " << (MAX_UPLOAD_RETRIES + 1) << " attempts - " << finalErrorMsg);
         }
         
-        // Step 16: Release upload lock to allow next upload to start
-        {
-            std::lock_guard<std::mutex> lock(g_uploadMutex);
-            g_activeUploads--;
-            g_isUploading = false;
-        }
-        g_uploadCondition.notify_all();
-
-        // Step 17: Handle confirmation AFTER releasing upload lock
+        // Step 16: Handle confirmation AFTER upload completes
         // This allows the next file to start uploading while this file is being confirmed
         if (uploadSuccess) {
             AWS_LOGSTREAM_INFO("S3Upload", "Upload success, checking fileOperationType for ID: " << uploadId 
@@ -329,30 +333,120 @@ void asyncUploadWorker(const String& uploadId,
         std::string errorMsg = "Upload failed with exception: " + std::string(e.what());
         manager.updateProgress(uploadId, UPLOAD_FAILED, errorMsg);
         AWS_LOGSTREAM_ERROR("S3Upload", "Exception in async upload: " << e.what());
-        
-        // Release upload lock
-        {
-            std::lock_guard<std::mutex> lock(g_uploadMutex);
-            g_activeUploads--;
-            g_isUploading = false;
-        }
-        g_uploadCondition.notify_all();
     } catch (...) {
         // Step 18: Handle unknown exceptions
         manager.updateProgress(uploadId, UPLOAD_FAILED, "Unknown error");
         AWS_LOGSTREAM_ERROR("S3Upload", "Unknown exception in async upload");
-        
-        // Release upload lock
-        {
-            std::lock_guard<std::mutex> lock(g_uploadMutex);
-            g_activeUploads--;
-            g_isUploading = false;
-        }
-        g_uploadCondition.notify_all();
     }
 }
 
-// Exported async upload function - starts file upload in background thread
+// Worker thread function - continuously processes upload tasks from the queue
+void uploadWorkerThread() {
+    AWS_LOGSTREAM_INFO("S3Upload", "Upload worker thread started");
+    
+    while (!g_shouldShutdown.load()) {
+        try {
+            // Update heartbeat
+            {
+                std::lock_guard<std::mutex> lock(g_heartbeatMutex);
+                g_lastHeartbeat = std::chrono::steady_clock::now();
+            }
+            
+            // Wait for and get next task from queue
+            UploadTask task;
+            {
+                std::unique_lock<std::mutex> lock(g_queueMutex);
+                
+                // Wait with timeout (5 seconds) to check shutdown flag periodically
+                bool hasTask = g_queueCondition.wait_for(lock, std::chrono::seconds(5), [] {
+                    return !g_uploadQueue.empty() || g_shouldShutdown.load();
+                });
+                
+                if (g_shouldShutdown.load() && g_uploadQueue.empty()) {
+                    break;
+                }
+                
+                if (!hasTask || g_uploadQueue.empty()) {
+                    continue; // Timeout, check heartbeat and continue
+                }
+                
+                // Get task from queue
+                task = g_uploadQueue.front();
+                g_uploadQueue.pop();
+                
+                AWS_LOGSTREAM_INFO("S3Upload", "Worker thread picked up task: " << task.uploadId 
+                                  << ", queue size: " << g_uploadQueue.size());
+            }
+            
+            // Process the upload task
+            asyncUploadWorker(task.uploadId, task.region, task.bucketName, 
+                            task.objectKey, task.localFilePath, 
+                            task.dataId, task.patientId);
+            
+        } catch (const std::exception& e) {
+            AWS_LOGSTREAM_ERROR("S3Upload", "Exception in worker thread: " << e.what());
+            // Continue running even if one task fails
+        } catch (...) {
+            AWS_LOGSTREAM_ERROR("S3Upload", "Unknown exception in worker thread");
+            // Continue running even if one task fails
+        }
+    }
+    
+    g_workerRunning = false;
+    AWS_LOGSTREAM_INFO("S3Upload", "Upload worker thread stopped");
+}
+
+// Start or restart the worker thread
+void ensureWorkerThreadRunning() {
+    std::lock_guard<std::mutex> lock(g_workerThreadMutex);
+    
+    // Check if thread needs to be started or restarted
+    bool needStart = false;
+    
+    if (!g_workerRunning.load()) {
+        needStart = true;
+        AWS_LOGSTREAM_WARN("S3Upload", "Worker thread not running, will start/restart");
+    } else {
+        // Check if thread is alive by checking heartbeat
+        std::lock_guard<std::mutex> hbLock(g_heartbeatMutex);
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - g_lastHeartbeat).count();
+        
+        if (elapsed > 30) { // If no heartbeat for 30 seconds, consider thread dead
+            AWS_LOGSTREAM_ERROR("S3Upload", "Worker thread heartbeat timeout (" << elapsed 
+                               << " seconds), will restart");
+            needStart = true;
+            g_workerRunning = false;
+            
+            // Try to join old thread if joinable
+            if (g_workerThread.joinable()) {
+                g_workerThread.detach(); // Detach dead thread
+            }
+        }
+    }
+    
+    if (needStart) {
+        g_shouldShutdown = false;
+        g_workerRunning = true;
+        
+        // Initialize heartbeat
+        {
+            std::lock_guard<std::mutex> hbLock(g_heartbeatMutex);
+            g_lastHeartbeat = std::chrono::steady_clock::now();
+        }
+        
+        // Create new worker thread
+        if (g_workerThread.joinable()) {
+            g_workerThread.detach();
+        }
+        
+        g_workerThread = std::thread(uploadWorkerThread);
+        AWS_LOGSTREAM_INFO("S3Upload", "Worker thread started successfully");
+    }
+}
+
+// Exported async upload function - adds upload task to global queue
+// A single persistent worker thread processes all upload tasks sequentially
 // Returns JSON with upload ID on success, error message on failure
 extern "C" S3UPLOAD_API const char* __stdcall UploadFileAsync(
     const char* region,
@@ -420,7 +514,10 @@ extern "C" S3UPLOAD_API const char* __stdcall UploadFileAsync(
             AWS_LOGSTREAM_ERROR("S3Upload", "Failed to get upload progress for uploadId: " << uploadId);
         }
 
-        // Step 5: Convert C-style parameters to C++ strings (avoid pointer lifetime issues)
+        // Step 5: Ensure worker thread is running (start if not running or restart if dead)
+        ensureWorkerThreadRunning();
+
+        // Step 6: Convert C-style parameters to C++ strings (avoid pointer lifetime issues)
         String strRegion = region;
         String strBucketName = bucketName;
         String strObjectKey = objectKey;
@@ -428,24 +525,69 @@ extern "C" S3UPLOAD_API const char* __stdcall UploadFileAsync(
         String strDataId = dataId;
         String strPatientId = patientId;
 
-        // Step 6: Start background thread for async upload (will be queued automatically)
-        std::thread uploadThread(asyncUploadWorker, uploadId,
-                               strRegion, strBucketName, strObjectKey, strLocalFilePath, strDataId, strPatientId);
-        uploadThread.detach(); // Detach thread so it runs independently
+        // Step 7: Add task to upload queue
+        {
+            std::lock_guard<std::mutex> lock(g_queueMutex);
+            UploadTask task;
+            task.uploadId = uploadId;
+            task.region = strRegion;
+            task.bucketName = strBucketName;
+            task.objectKey = strObjectKey;
+            task.localFilePath = strLocalFilePath;
+            task.dataId = strDataId;
+            task.patientId = strPatientId;
+            
+            g_uploadQueue.push(task);
+            AWS_LOGSTREAM_INFO("S3Upload", "Task added to queue: " << uploadId 
+                              << ", queue size: " << g_uploadQueue.size());
+        }
+        
+        // Notify worker thread that new task is available
+        g_queueCondition.notify_one();
 
-        // Step 7: Return success response with upload ID
+        // Step 8: Return success response with upload ID
         response = create_response(UPLOAD_SUCCESS, uploadId);
         return response.c_str();
 
     } catch (const std::exception& e) {
-        // Step 8: Handle exceptions during thread creation
-        response = create_response(UPLOAD_FAILED, formatErrorMessage("Failed to start async upload", e.what()));
+        // Step 9: Handle exceptions during task queue addition
+        response = create_response(UPLOAD_FAILED, formatErrorMessage("Failed to enqueue upload task", e.what()));
         return response.c_str();
     } catch (...) {
-        // Step 9: Handle unknown exceptions
-        response = create_response(UPLOAD_FAILED, formatErrorMessage("Failed to start async upload", ErrorMessage::UNKNOWN_ERROR));
+        // Step 10: Handle unknown exceptions
+        response = create_response(UPLOAD_FAILED, formatErrorMessage("Failed to enqueue upload task", ErrorMessage::UNKNOWN_ERROR));
         return response.c_str();
     }
+}
+
+// Shutdown the upload worker thread gracefully
+// Should be called when the application is shutting down
+extern "C" S3UPLOAD_API void __stdcall ShutdownUploadWorker() {
+    AWS_LOGSTREAM_INFO("S3Upload", "Shutting down upload worker thread...");
+    
+    // Signal worker thread to stop
+    g_shouldShutdown = true;
+    
+    // Wake up worker thread if it's waiting
+    g_queueCondition.notify_all();
+    
+    // Wait for worker thread to finish (with timeout)
+    std::lock_guard<std::mutex> lock(g_workerThreadMutex);
+    if (g_workerThread.joinable()) {
+        // Use detach for now to avoid blocking too long
+        // In a production environment, you might want to implement a timed join
+        g_workerThread.detach();
+    }
+    
+    g_workerRunning = false;
+    AWS_LOGSTREAM_INFO("S3Upload", "Upload worker thread shutdown complete");
+}
+
+// Get the current upload queue size
+// Returns the number of pending upload tasks in the queue
+extern "C" S3UPLOAD_API int __stdcall GetUploadQueueSize() {
+    std::lock_guard<std::mutex> lock(g_queueMutex);
+    return static_cast<int>(g_uploadQueue.size());
 }
 
 // Get async upload status as byte array - safer for VB6 interop
