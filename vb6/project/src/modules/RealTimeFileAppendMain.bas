@@ -136,4 +136,14 @@ Public Sub Main()
     Else
         Debug.Print "ERROR: Real-time upload process failed"
     End If
+
+    ' 9. Cleanup: Shutdown upload worker thread gracefully (OPTIONAL)
+    ' Note: This is optional for short-lived programs like this real-time upload tool.
+    ' The OS will automatically clean up threads when the process exits.
+    ' However, calling this is a best practice because:
+    ' - Ensures graceful shutdown of the worker thread
+    ' - Prevents potential warnings in memory debugging tools
+    ' - Makes the code more maintainable for future long-running scenarios
+    Call ShutdownUploadWorker
+    Debug.Print "Upload worker thread shutdown complete"
 End Sub

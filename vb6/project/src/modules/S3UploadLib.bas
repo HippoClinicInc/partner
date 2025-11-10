@@ -55,3 +55,25 @@ Declare Function GetAsyncUploadStatusBytes Lib "S3UploadLib.dll" ( _
     ByVal bufferSize As Long _
 ) As Long
 
+' Shutdown the upload worker thread gracefully (OPTIONAL)
+'
+' Purpose: Cleanly stops the global upload worker thread and releases resources
+' 
+' When to call:
+' - Recommended: Before application exits (best practice)
+' - Optional for short-lived programs that exit immediately after uploads complete
+' - Required for long-running applications (services, background apps, etc.)
+'
+' Benefits:
+' - Ensures graceful shutdown of the worker thread
+' - Prevents potential warnings in memory debugging tools
+' - Follows proper resource cleanup practices
+'
+' Note: If not called, the OS will automatically clean up when process exits.
+' This is safe for batch upload tools but calling it is still recommended.
+'
+' Usage example:
+'   ' After all uploads complete and before Exit Sub
+'   Call ShutdownUploadWorker
+'   Debug.Print "Worker thread shutdown complete"
+Declare Sub ShutdownUploadWorker Lib "S3UploadLib.dll" ()
