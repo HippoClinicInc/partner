@@ -31,13 +31,6 @@ End Enum
 Public Const S3_BUCKET As String = "hippoclinic-staging"
 Public Const S3_REGION As String = "us-west-1"
 
-' These variables are initialized by HippoBackend.Initialize() and used for:
-' 1. HippoClinic API authentication (login, create patient, generate dataId, etc.)
-' 2. S3 credentials retrieval via SetCredential()
-Public gHippoBaseUrl As String
-Public gHippoAccount As String
-Public gHippoPassword As String
-
 ' HippoClinic configuration constants (change these according to your environment)
 Public Const HIPPO_BASE_URL As String = "https://hippoclinic.com"
 Public Const HIPPO_ACCOUNT As String = "2546566177@qq.com"
@@ -46,6 +39,13 @@ Public Const HIPPO_PASSWORD As String = "u3LJ2lXv"
 ' Patient configuration constants (for demo purposes)
 Public Const DEFAULT_MRN As String = "123"
 Public Const DEFAULT_PATIENT_NAME As String = "Test api"
+
+' These variables are initialized by HippoBackend.Initialize() and used for:
+' 1. HippoClinic API authentication (login, create patient, generate dataId, etc.)
+' 2. S3 credentials retrieval via SetCredential()
+Public gHippoBaseUrl As String
+Public gHippoAccount As String
+Public gHippoPassword As String
 
 ' Windows API declarations (used by monitoring loops)
 Public Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
