@@ -133,7 +133,7 @@ Public Sub Main()
         uploadSuccess = MonitorUploadStatus(dataId, maxWaitTime)
     End If
 
-    ' 9. Upload process completed (confirmation and cleanup are handled automatically by C++ bckend)
+    ' 9. Upload process completed (confirmation and cleanup are handled automatically by C++ backend)
     If uploadSuccess Then
         Debug.Print "SUCCESS: Real-time upload completed and confirmed"
         MsgBox "SUCCESS: Real-time upload completed"

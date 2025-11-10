@@ -22,7 +22,6 @@ Private gIsInitialized As Boolean
 
 ' Initialize HippoBackend with configuration parameters
 ' This function must be called before using any other HippoBackend functions
-' Similar to HippoClient::Init() in C++
 '
 ' Example:
 '   HippoBackend.Initialize "https://hippoclinic.com", "user@example.com", "password"

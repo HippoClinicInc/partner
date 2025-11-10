@@ -128,7 +128,7 @@ Sub Main()
         End If
     End If
 
-    ' 7. Upload process completed (confirmation and cleanup are handled automatically by C++ bckend)
+    ' 7. Upload process completed (confirmation and cleanup are handled automatically by C++ backend)
     If uploadSuccess Then
         Debug.Print "SUCCESS: Upload completed and confirmed"
         MsgBox "SUCCESS: Upload completed"
