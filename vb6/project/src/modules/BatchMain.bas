@@ -32,14 +32,18 @@ Sub Main()
     Dim sdkInitResult As String
     Dim s3FileKey As String
 
-    ' 0. Set DLL search path and validate DLL files
+    ' 0. Initialize HippoBackend with configuration
+    ' Parameters are defined in Common.bas (HIPPO_BASE_URL, HIPPO_ACCOUNT, HIPPO_PASSWORD)
+    HippoBackend.Initialize HIPPO_BASE_URL, HIPPO_ACCOUNT, HIPPO_PASSWORD
+    
+    ' 1. Set DLL search path and validate DLL files
     If Not SetDllSearchPath() Then
         Debug.Print "ERROR: Failed to set DLL search path"
         MsgBox "ERROR: Failed to set DLL search path. Please check if lib directory exists and contains S3UploadLib.dll.", vbCritical, "DLL Path Error"
         Exit Sub
     End If
 
-    ' 1. Get file path from user input and validate existence
+    ' 2. Get file path from user input and validate existence
     uploadFilePath = InputBox("Please enter the file path to upload:", "File Upload", "")
     uploadFilePath = Trim(uploadFilePath)
     If Len(uploadFilePath) > 1 Then
@@ -59,20 +63,20 @@ Sub Main()
         Exit Sub
     End If
 
-    ' 2. Create patient record (token managed internally)
+    ' 3. Create patient record (token managed internally)
     If Not CreatePatient(patientId) Then
         Debug.Print "ERROR: Failed to create patient"
         Exit Sub
     End If
 
-    ' 3. Generate unique data ID (token managed internally)
+    ' 4. Generate unique data ID (token managed internally)
     If Not GenerateDataId(dataId) Then
         Debug.Print "ERROR: Failed to generate data ID"
         Exit Sub
     End If
 
     ' 5. Set credentials and initialize AWS SDK
-    sdkInitResult = SetCredential(ENV_URL, LOGIN_ACCOUNT, LOGIN_ACCOUNT_PASSWORD)
+    sdkInitResult = SetCredential(gHippoBaseUrl, gHippoAccount, gHippoPassword)
 
     Dim jsonResponse As Object
     Set jsonResponse = JsonConverter.ParseJson(sdkInitResult)
@@ -124,7 +128,7 @@ Sub Main()
         End If
     End If
 
-    ' 7. Upload process completed (confirmation and cleanup are handled automatically by C++ backend)
+    ' 7. Upload process completed (confirmation and cleanup are handled automatically by C++ bckend)
     If uploadSuccess Then
         Debug.Print "SUCCESS: Upload completed and confirmed"
         MsgBox "SUCCESS: Upload completed"

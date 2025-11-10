@@ -3,23 +3,60 @@ Option Explicit
 
 ' HippoBackend.bas - HippoClinic backend API functions
 ' This module contains functions that interact with the HippoClinic backend API
+'
+' Usage pattern
+' 1. Call HippoBackend.Initialize(baseUrl, account, password) at application startup
+' 2. Then call other functions like CreatePatient(), GenerateDataId(), etc.
+'
+' Example:
+'   HippoBackend.Initialize "https://hippoclinic.com", "user@example.com", "password"
+'   Dim patientId As String
+'   If CreatePatient(patientId) Then
+'       Debug.Print "Patient created: " & patientId
+'   End If
 
-Public Const ENV_URL As String = "https://hippoclinic.com"
-' You need to change to your account when testing this.
-Public Const LOGIN_ACCOUNT As String = "2546566177@qq.com"
-Public Const LOGIN_ACCOUNT_PASSWORD As String = "u3LJ2lXv"
-
-' Module-level constant for default Medical Record Number (MRN)
-' This hardcoded value is used for demonstration purposes only
-Private Const DEFAULT_MRN As String = "123"
-Private Const DEFAULT_PATIENT_NAME As String = "Test api"
-
-' Module-level auth state (managed internally)
+' Module-level auth state 
 Private gJwtToken As String
 Private gHospitalId As String
+Private gIsInitialized As Boolean
+
+' Initialize HippoBackend with configuration parameters
+' This function must be called before using any other HippoBackend functions
+' Similar to HippoClient::Init() in C++
+'
+' Example:
+'   HippoBackend.Initialize "https://hippoclinic.com", "user@example.com", "password"
+Public Sub Initialize(ByVal baseUrl As String, ByVal account As String, ByVal password As String)
+    gHippoBaseUrl = baseUrl
+    gHippoAccount = account
+    gHippoPassword = password
+    gIsInitialized = True
+    
+    ' Clear any existing auth state
+    gJwtToken = ""
+    gHospitalId = ""
+    
+    Debug.Print "[HippoBackend] Initialized with account=" & account & ", baseUrl=" & baseUrl
+End Sub
+
+' Check if HippoBackend has been initialized
+Private Function CheckInitialized() As Boolean
+    If Not gIsInitialized Then
+        Debug.Print "ERROR: HippoBackend not initialized. Call HippoBackend.Initialize() first."
+        CheckInitialized = False
+    Else
+        CheckInitialized = True
+    End If
+End Function
 
 ' Ensure we have a valid token and hospital id
 Private Function EnsureLoggedIn() As Boolean
+    ' Check if module has been initialized
+    If Not CheckInitialized() Then
+        EnsureLoggedIn = False
+        Exit Function
+    End If
+    
     If Len(gJwtToken) > 0 And Len(gHospitalId) > 0 Then
         EnsureLoggedIn = True
         Exit Function
@@ -95,6 +132,7 @@ Public Function GetHospitalId() As String
 End Function
 
 ' Authenticate user and retrieve JWT token and hospital ID
+' Uses configuration from Common.bas (gHippoBaseUrl, gHippoAccount, gHippoPassword)
 Public Function LoginAndGetToken(ByRef jwtToken As String, ByRef hospitalId As String) As Boolean
     Dim http As Object
     Dim url As String
@@ -104,9 +142,9 @@ Public Function LoginAndGetToken(ByRef jwtToken As String, ByRef hospitalId As S
     ' 1. Initialize HTTP client
     Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
 
-    ' 2. Build login request
-    url = ENV_URL & "/hippo/thirdParty/user/login"
-    requestBody = "{""userMessage"":{""email"":""" & LOGIN_ACCOUNT & """},""password"":""" & LOGIN_ACCOUNT_PASSWORD & """}"
+    ' 2. Build login request using module configuration
+    url = gHippoBaseUrl & "/hippo/thirdParty/user/login"
+    requestBody = "{""userMessage"":{""email"":""" & gHippoAccount & """},""password"":""" & gHippoPassword & """}"
 
     On Error GoTo ErrorHandler
 
@@ -129,6 +167,7 @@ Public Function LoginAndGetToken(ByRef jwtToken As String, ByRef hospitalId As S
 
     ' 6. Validate extracted data
     LoginAndGetToken = (jwtToken <> "" And hospitalId <> "")
+    Debug.Print "[HippoBackend] Login success, jwt_token obtained, hospital_id=" & hospitalId
     Set http = Nothing
     Exit Function
 
@@ -147,6 +186,7 @@ ErrorHandler:
 End Function
 
 ' Create patient record and return patient ID
+' Uses default patient name and MRN from Common.bas constants
 Public Function CreatePatient(ByRef patientId As String) As Boolean
     Dim http As Object
     Dim url As String
@@ -159,8 +199,8 @@ Public Function CreatePatient(ByRef patientId As String) As Boolean
         Exit Function
     End If
 
-    ' 2. Build patient creation request
-    url = ENV_URL & "/hippo/thirdParty/queryOrCreatePatient"
+    ' 2. Build patient creation request using module configuration
+    url = gHippoBaseUrl & "/hippo/thirdParty/queryOrCreatePatient"
     requestBody = "{""hospitalId"":""" & gHospitalId & """,""user"":{""name"":""" & DEFAULT_PATIENT_NAME & """,""roles"":[3],""hospitalId"":""" & gHospitalId & """,""mrn"":""" & DEFAULT_MRN & """}}"
 
     On Error GoTo ErrorHandler
@@ -211,8 +251,8 @@ Public Function GenerateDataId(ByRef dataId As String) As Boolean
         Exit Function
     End If
 
-    ' 2. Build data ID generation request
-    url = ENV_URL & "/hippo/thirdParty/file/generateUniqueKey" & "/1"
+    ' 2. Build data ID generation request using module configuration
+    url = gHippoBaseUrl & "/hippo/thirdParty/file/generateUniqueKey" & "/1"
 
     On Error GoTo ErrorHandler
 
