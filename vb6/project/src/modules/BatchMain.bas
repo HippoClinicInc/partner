@@ -23,7 +23,6 @@ Option Explicit
 ' Main function to handle file upload workflow with HippoClinic API
 Sub Main()
     ' HippoClinic configuration constants (change these according to your environment)
-    Const HIPPO_BASE_URL As String = "https://hippoclinic.com"
     Const HIPPO_ACCOUNT As String = "2546566177@qq.com"
     Const HIPPO_PASSWORD As String = "u3LJ2lXv"
     

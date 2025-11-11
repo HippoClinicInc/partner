@@ -25,6 +25,9 @@ Public Enum FileOperationType
     REAL_TIME_APPEND= 1
 End Enum
 
+' HippoClinic configuration constants
+Public Const HIPPO_BASE_URL As String = "https://hippoclinic.com"
+
 ' S3 configuration constants
 ' For prod running, do not change it here. In our current prod settings,
 ' the prod bucket is called "hippoclinic-staging". We will change it later.

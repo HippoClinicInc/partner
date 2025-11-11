@@ -271,13 +271,12 @@ Public Const S3_BUCKET As String = "hippoclinic-staging"
 Public Const S3_REGION As String = "us-west-1"
 ```
 
-### HippoClinic Environment Configuration (per entry module)
+### HippoClinic Environment Configuration
 
-Each upload entry point defines its own HippoClinic configuration constants at the top of `Sub Main`:
+`HIPPO_BASE_URL` is centralized in `Common.bas`. Credentials can be configured in the entry module you plan to run (e.g., at the top of `Sub Main` in `BatchMain.bas`).
 
 ```vb
-' Example from BatchMain.bas
-Const HIPPO_BASE_URL As String = "https://hippoclinic.com"
+' Example from BatchMain.bas (replace with your own credentials)
 Const HIPPO_ACCOUNT As String = "your-email@example.com"
 Const HIPPO_PASSWORD As String = "your-password"
 
@@ -285,7 +284,7 @@ Const DEFAULT_MRN As String = "123"
 Const DEFAULT_PATIENT_NAME As String = "Test api"
 ```
 
-Update these values in the specific module you plan to run.
+Update the above values (account, password, and patient info) in the entry module you plan to run. Do not redefine `HIPPO_BASE_URL` in entry modules.
 
 ### Initialization
 

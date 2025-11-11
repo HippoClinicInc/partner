@@ -24,15 +24,6 @@ Option Explicit
 
 ' Real-time signal append upload flow
 Public Sub Main()
-    ' HippoClinic configuration constants (change these according to your environment)
-    Const HIPPO_BASE_URL As String = "https://hippoclinic.com"
-    Const HIPPO_ACCOUNT As String = "2546566177@qq.com"
-    Const HIPPO_PASSWORD As String = "u3LJ2lXv"
-    
-    ' Patient configuration constants (for demo purposes)
-    Const DEFAULT_MRN As String = "123"
-    Const DEFAULT_PATIENT_NAME As String = "Test api"
-    
     Dim patientId As String
     Dim dataId As String
     Dim uploadFilePath As String
@@ -42,17 +33,14 @@ Public Sub Main()
     Dim sdkInitResult As String
     Dim s3FileKey As String
 
-    ' 0. Initialize HippoBackend with configuration
-    HippoBackend.Initialize HIPPO_BASE_URL, HIPPO_ACCOUNT, HIPPO_PASSWORD
-    
-    ' 1. Set DLL search path and validate DLL files
+    ' 0. Set DLL search path and validate DLL files
     If Not SetDllSearchPath() Then
         Debug.Print "ERROR: Failed to set DLL search path"
         MsgBox "ERROR: Failed to set DLL search path. Please check if lib directory exists and contains S3UploadLib.dll.", vbCritical, "DLL Path Error"
         Exit Sub
     End If
 
-    ' 2. Get file path from user input and validate existence
+    ' 1. Get file path from user input and validate existence
     uploadFilePath = InputBox("Please enter the file path to upload (real-time):", "File Upload (Real-time)", "")
     uploadFilePath = Trim(uploadFilePath)
     If Len(uploadFilePath) > 1 Then
@@ -72,20 +60,20 @@ Public Sub Main()
         Exit Sub
     End If
 
-    ' 3. Check if the path is a folder (not supported for real-time append)
+    ' 2. Check if the path is a folder (not supported for real-time append)
     If IsPathFolder(uploadFilePath) Then
         Debug.Print "ERROR: Folder upload is not supported for REAL_TIME_APPEND mode"
         MsgBox "ERROR: Folder upload is not supported for REAL_TIME_APPEND mode. Please provide a single file path.", vbCritical, "Folder Not Supported"
         Exit Sub
     End If
 
-    ' 4. Create patient record (token managed internally)
-    If Not CreatePatient(patientId, DEFAULT_MRN, DEFAULT_PATIENT_NAME) Then
+    ' 3. Create patient record (token managed internally)
+    If Not CreatePatient(patientId) Then
         Debug.Print "ERROR: Failed to create patient"
         Exit Sub
     End If
 
-    ' 5. Ask user to choose between new or append mode
+    ' 4. Ask user to choose between new or append mode
     Dim userChoice As String
     userChoice = InputBox("Please choose upload mode:" & vbCrLf & _
                           "1 - New (create new dataId)" & vbCrLf & _
@@ -98,7 +86,7 @@ Public Sub Main()
     End If
     
     If userChoice = "2" Then
-        ' 5.1. Append mode: ask user to input existing dataId
+        ' 4.1. Append mode: ask user to input existing dataId
         dataId = InputBox("Please enter the existing dataId to append:", "Append Mode", "")
         dataId = Trim(dataId)
         If dataId = "" Then
@@ -107,15 +95,15 @@ Public Sub Main()
         End If
         Debug.Print "Using existing dataId for append: " & dataId
     Else
-        ' 5.2. New mode: generate new dataId (default behavior)
+        ' 4.2. New mode: generate new dataId (default behavior)
         If Not GenerateDataId(dataId) Then
             Debug.Print "ERROR: Failed to generate data ID"
             Exit Sub
         End If
     End If
 
-    ' 6. Set credentials and initialize AWS SDK
-    sdkInitResult = SetCredential(HIPPO_BASE_URL, HIPPO_ACCOUNT, HIPPO_PASSWORD)
+    ' 5. Set credentials and initialize AWS SDK
+    sdkInitResult = SetCredential(HIPPO_BASE_URL, LOGIN_ACCOUNT, LOGIN_ACCOUNT_PASSWORD)
     Dim jsonResponse As Object
     Set jsonResponse = JsonConverter.ParseJson(sdkInitResult)
     If jsonResponse("code") <> SDK_INIT_SUCCESS Then
@@ -126,7 +114,7 @@ Public Sub Main()
     Dim maxWaitTime As Long
     maxWaitTime = 600 ' Maximum wait time in seconds (10 minutes)
 
-    ' 7. Upload single file
+    ' 6. Upload single file
     ' Upload data name: abc.ds
     uploadDataName = GetFileName(uploadFilePath)
     ' S3 file key: patient/patientId/source_data/dataId/abc.ds/abc.ds
@@ -134,18 +122,19 @@ Public Sub Main()
     Dim singleUploadId As String
     uploadSuccess = UploadSingleFile(uploadFilePath, s3FileKey, dataId, patientId, REAL_TIME_APPEND, singleUploadId)
 
-    ' 8. Monitor single file upload status
+    ' 7. Monitor single file upload status
     If uploadSuccess Then
         totalFileSize = GetLocalFileSize(uploadFilePath)
         Debug.Print "Single file upload started (real-time), monitoring status..."
         uploadSuccess = MonitorUploadStatus(dataId, maxWaitTime)
     End If
 
-    ' 9. Upload process completed (confirmation and cleanup are handled automatically by C++ backend)
+    ' 8. Upload process completed (confirmation and cleanup are handled automatically by C++ backend)
     If uploadSuccess Then
         Debug.Print "SUCCESS: Real-time upload completed and confirmed"
         MsgBox "SUCCESS: Real-time upload completed"
     Else
         Debug.Print "ERROR: Real-time upload process failed"
     End If
+
 End Sub
