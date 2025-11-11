@@ -50,15 +50,15 @@ project/
 
 #### `Common.bas`
 **Common Utilities Module** - Contains shared functions and utilities used across modules:
-- **Unified Configuration** - Centralized configuration constants for S3 and HippoClinic API
+- **S3 Configuration** - Centralized S3 constants shared across upload flows
 - **Module-Level Variables** - Runtime configuration storage for application state
 - **Utility Functions** - Common functions used by multiple modules (file upload, status monitoring)
 - **Enums and Constants** - Shared enumerations and constants
 
 **Key Features:**
-- Unified configuration management (HIPPO_BASE_URL, HIPPO_ACCOUNT, HIPPO_PASSWORD)
 - S3 configuration constants (S3_BUCKET, S3_REGION)
-- Patient configuration constants (DEFAULT_MRN, DEFAULT_PATIENT_NAME)
+- Shared upload helpers (UploadSingleFile, MonitorUploadStatus)
+- Cross-module shared logic and utilities
 - File upload and monitoring functions (UploadSingleFile, MonitorUploadStatus)
 - Cross-module shared logic and utilities
 
@@ -249,11 +249,10 @@ You can find the installer in the `cpp_runtime` folder. click the `install_all.b
    ```
 
 5. **Configure Constants**
-   ```
-   Edit Common.bas constants section:
-   - S3_BUCKET, S3_REGION (S3 configuration)
-   - HIPPO_BASE_URL, HIPPO_ACCOUNT, HIPPO_PASSWORD (HippoClinic API configuration)
-   ```
+```
+- Edit Common.bas for shared S3 settings: S3_BUCKET, S3_REGION
+- Edit the entry module you plan to run (BatchMain.bas or RealTimeFileAppendMain.bas) and update the HIPPO_* and patient constants declared at the top of Sub Main.
+```
 
 6. **Run Application**
    ```
@@ -262,20 +261,31 @@ You can find the installer in the `cpp_runtime` folder. click the `install_all.b
 
 ## 🔧 Configuration
 
-### Unified Configuration (Common.bas)
+### S3 Configuration (Common.bas)
 
-All configuration constants are centrally managed in `Common.bas`:
+Shared S3 configuration constants remain centralized in `Common.bas`:
 
 ```vb
 ' S3 configuration constants
 Public Const S3_BUCKET As String = "hippoclinic-staging"
 Public Const S3_REGION As String = "us-west-1"
-
-' HippoClinic configuration constants (change these according to your environment)
-Public Const HIPPO_BASE_URL As String = "https://hippoclinic.com"
-Public Const HIPPO_ACCOUNT As String = "your-email@example.com"
-Public Const HIPPO_PASSWORD As String = "your-password"
 ```
+
+### HippoClinic Environment Configuration (per entry module)
+
+Each upload entry point defines its own HippoClinic configuration constants at the top of `Sub Main`:
+
+```vb
+' Example from BatchMain.bas
+Const HIPPO_BASE_URL As String = "https://hippoclinic.com"
+Const HIPPO_ACCOUNT As String = "your-email@example.com"
+Const HIPPO_PASSWORD As String = "your-password"
+
+Const DEFAULT_MRN As String = "123"
+Const DEFAULT_PATIENT_NAME As String = "Test api"
+```
+
+Update these values in the specific module you plan to run.
 
 ### Initialization
 
@@ -286,7 +296,7 @@ The application automatically initializes HippoBackend with the constants define
 HippoBackend.Initialize HIPPO_BASE_URL, HIPPO_ACCOUNT, HIPPO_PASSWORD
 ```
 
-This unified configuration is used for both:
+This initialization uses the per-module constants you configured and provides:
 1. HippoClinic API authentication (login, create patient, generate dataId)
 2. S3 credentials retrieval via SetCredential()
 
@@ -555,7 +565,7 @@ For technical support or questions:
 ## Important Notes
 
 1. **DLL Files**: Ensure all DLL files are in lib directory and accessible
-2. **Unified Configuration**: All configuration constants (API and S3) are centrally managed in `Common.bas` - modify `HIPPO_BASE_URL`, `HIPPO_ACCOUNT`, `HIPPO_PASSWORD` according to your environment
+2. **Configuration**: Update S3 constants in `Common.bas`, and adjust `HIPPO_*` / patient constants inside the entry module (`BatchMain.bas`, `RealTimeFileAppendMain.bas`, etc.) before running
 3. **Initialization Required**: The application automatically calls `HippoBackend.Initialize()` at startup using constants from `Common.bas`
 4. **Upload Support**: Project supports single file and folder uploads (folder upload only in BatchMain.bas)
 5. **Error Handling**: Upload process includes progress monitoring and error handling
