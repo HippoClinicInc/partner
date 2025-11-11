@@ -24,6 +24,15 @@ Option Explicit
 
 ' Real-time signal append upload flow
 Public Sub Main()
+    ' HippoClinic configuration constants (change these according to your environment)
+    Const HIPPO_BASE_URL As String = "https://hippoclinic.com"
+    Const HIPPO_ACCOUNT As String = "2546566177@qq.com"
+    Const HIPPO_PASSWORD As String = "u3LJ2lXv"
+    
+    ' Patient configuration constants (for demo purposes)
+    Const DEFAULT_MRN As String = "123"
+    Const DEFAULT_PATIENT_NAME As String = "Test api"
+    
     Dim patientId As String
     Dim dataId As String
     Dim uploadFilePath As String
@@ -34,7 +43,6 @@ Public Sub Main()
     Dim s3FileKey As String
 
     ' 0. Initialize HippoBackend with configuration
-    ' Parameters are defined in Common.bas (HIPPO_BASE_URL, HIPPO_ACCOUNT, HIPPO_PASSWORD)
     HippoBackend.Initialize HIPPO_BASE_URL, HIPPO_ACCOUNT, HIPPO_PASSWORD
     
     ' 1. Set DLL search path and validate DLL files
@@ -72,7 +80,7 @@ Public Sub Main()
     End If
 
     ' 4. Create patient record (token managed internally)
-    If Not CreatePatient(patientId) Then
+    If Not CreatePatient(patientId, DEFAULT_MRN, DEFAULT_PATIENT_NAME) Then
         Debug.Print "ERROR: Failed to create patient"
         Exit Sub
     End If
@@ -107,7 +115,7 @@ Public Sub Main()
     End If
 
     ' 6. Set credentials and initialize AWS SDK
-    sdkInitResult = SetCredential(gHippoBaseUrl, gHippoAccount, gHippoPassword)
+    sdkInitResult = SetCredential(HIPPO_BASE_URL, HIPPO_ACCOUNT, HIPPO_PASSWORD)
     Dim jsonResponse As Object
     Set jsonResponse = JsonConverter.ParseJson(sdkInitResult)
     If jsonResponse("code") <> SDK_INIT_SUCCESS Then

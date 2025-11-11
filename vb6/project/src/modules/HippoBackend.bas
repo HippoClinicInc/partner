@@ -19,6 +19,9 @@ Option Explicit
 Private gJwtToken As String
 Private gHospitalId As String
 Private gIsInitialized As Boolean
+Private gHippoBaseUrl As String
+Private gHippoAccount As String
+Private gHippoPassword As String
 
 ' Initialize HippoBackend with configuration parameters
 ' This function must be called before using any other HippoBackend functions
@@ -131,7 +134,6 @@ Public Function GetHospitalId() As String
 End Function
 
 ' Authenticate user and retrieve JWT token and hospital ID
-' Uses configuration from Common.bas (gHippoBaseUrl, gHippoAccount, gHippoPassword)
 Public Function LoginAndGetToken(ByRef jwtToken As String, ByRef hospitalId As String) As Boolean
     Dim http As Object
     Dim url As String
@@ -185,8 +187,7 @@ ErrorHandler:
 End Function
 
 ' Create patient record and return patient ID
-' Uses default patient name and MRN from Common.bas constants
-Public Function CreatePatient(ByRef patientId As String) As Boolean
+Public Function CreatePatient(ByRef patientId As String, ByVal mrn As String, ByVal patientName As String) As Boolean
     Dim http As Object
     Dim url As String
     Dim requestBody As String
@@ -200,7 +201,7 @@ Public Function CreatePatient(ByRef patientId As String) As Boolean
 
     ' 2. Build patient creation request using module configuration
     url = gHippoBaseUrl & "/hippo/thirdParty/queryOrCreatePatient"
-    requestBody = "{""hospitalId"":""" & gHospitalId & """,""user"":{""name"":""" & DEFAULT_PATIENT_NAME & """,""roles"":[3],""hospitalId"":""" & gHospitalId & """,""mrn"":""" & DEFAULT_MRN & """}}"
+    requestBody = "{""hospitalId"":""" & gHospitalId & """,""user"":{""name"":""" & patientName & """,""roles"":[3],""hospitalId"":""" & gHospitalId & """,""mrn"":""" & mrn & """}}"
 
     On Error GoTo ErrorHandler
 
