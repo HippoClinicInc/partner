@@ -50,28 +50,35 @@ project/
 
 #### `Common.bas`
 **Common Utilities Module** - Contains shared functions and utilities used across modules:
-- **Shared Constants** - Project-level configuration constants
-- **Utility Functions** - Common functions used by multiple modules
-- **Helper Functions** - General-purpose helper and utility functions
+- **S3 Configuration** - Centralized S3 constants shared across upload flows
+- **Module-Level Variables** - Runtime configuration storage for application state
+- **Utility Functions** - Common functions used by multiple modules (file upload, status monitoring)
+- **Enums and Constants** - Shared enumerations and constants
 
 **Key Features:**
-- Shared configuration and constant definitions
-- Common utility functions
-- Cross-module shared logic
+- S3 configuration constants (S3_BUCKET, S3_REGION)
+- Shared upload helpers (UploadSingleFile, MonitorUploadStatus)
+- Cross-module shared logic and utilities
+- File upload and monitoring functions (UploadSingleFile, MonitorUploadStatus)
+- Cross-module shared logic and utilities
 
 #### `HippoBackend.bas`
 **HippoClinic API Integration** - Backend API communication module:
-- **Authentication** - Login and JWT token management
+- **Initialization** - Configuration management with centralized parameter control
+- **Authentication** - Login and JWT token management with automatic retry
 - **Patient Management** - Patient record creation and management
 - **API Communication** - HTTP requests to HippoClinic API endpoints
-- **Credential Management** - S3 credentials retrieval
+- **Credential Management** - Unified configuration for both API and S3
 
 **Key Functions:**
+- `Initialize(baseUrl, account, password)` - Initialize backend with custom configuration
 - `LoginAndGetToken()` - Authenticate with HippoClinic API
 - `CreatePatient()` - Create patient records
-- `GetS3Credentials()` - Retrieve AWS S3 temporary credentials
 - `GenerateDataId()` - Generate unique data identifiers
-- `ConfirmUploadRawFile()` - Confirm uploads with API
+- `GetHospitalId()` - Retrieve current hospital ID
+
+**Design Pattern:**
+Uses module-level variables for configuration state, requiring initialization before use.
 
 #### `FileLib.bas`
 **File System Operations** - File and folder management utilities:
@@ -242,11 +249,10 @@ You can find the installer in the `cpp_runtime` folder. click the `install_all.b
    ```
 
 5. **Configure Constants**
-   ```
-   Edit Common.bas and HippoBackend.bas constants sections:
-   - Common.bas: S3_BUCKET, S3_REGION (shared configuration)
-   - HippoBackend.bas: ENV_URL, LOGIN_ACCOUNT, LOGIN_ACCOUNT_PASSWORD
-   ```
+```
+- Edit Common.bas for shared S3 settings: S3_BUCKET, S3_REGION
+- Edit the entry module you plan to run (BatchMain.bas or RealTimeFileAppendMain.bas) and update the HIPPO_* and patient constants declared at the top of Sub Main.
+```
 
 6. **Run Application**
    ```
@@ -255,18 +261,43 @@ You can find the installer in the `cpp_runtime` folder. click the `install_all.b
 
 ## 🔧 Configuration
 
-### API Configuration (HippoBackend.bas)
-```vb
-Private Const ENV_URL As String = "https://hippoclinic.com"
-Private Const LOGIN_ACCOUNT As String = "your-email@example.com"
-Private Const LOGIN_ACCOUNT_PASSWORD As String = "your-password"
-```
-
 ### S3 Configuration (Common.bas)
+
+Shared S3 configuration constants remain centralized in `Common.bas`:
+
 ```vb
+' S3 configuration constants
 Public Const S3_BUCKET As String = "hippoclinic-staging"
 Public Const S3_REGION As String = "us-west-1"
 ```
+
+### HippoClinic Environment Configuration
+
+`HIPPO_BASE_URL` is centralized in `Common.bas`. Credentials can be configured in the entry module you plan to run (e.g., at the top of `Sub Main` in `BatchMain.bas`).
+
+```vb
+' Example from BatchMain.bas (replace with your own credentials)
+Const HIPPO_ACCOUNT As String = "your-email@example.com"
+Const HIPPO_PASSWORD As String = "your-password"
+
+Const DEFAULT_MRN As String = "123"
+Const DEFAULT_PATIENT_NAME As String = "Test api"
+```
+
+Update the above values (account, password, and patient info) in the entry module you plan to run. Do not redefine `HIPPO_BASE_URL` in entry modules.
+
+### Initialization
+
+The application automatically initializes HippoBackend with the constants defined in `Common.bas`:
+
+```vb
+' In BatchMain.bas or RealTimeFileAppendMain.bas
+HippoBackend.Initialize HIPPO_BASE_URL, HIPPO_ACCOUNT, HIPPO_PASSWORD
+```
+
+This initialization uses the per-module constants you configured and provides:
+1. HippoClinic API authentication (login, create patient, generate dataId)
+2. S3 credentials retrieval via SetCredential()
 
 ## 📋 Usage
 
@@ -533,11 +564,12 @@ For technical support or questions:
 ## Important Notes
 
 1. **DLL Files**: Ensure all DLL files are in lib directory and accessible
-2. **API Configuration**: Modify API configuration information to match your environment
-3. **Upload Support**: Project supports single file and folder uploads
-4. **Error Handling**: Upload process includes progress monitoring and error handling
-5. **Path Issues**: If encountering DLL loading problems, check if lib directory exists and contains all required DLL files
-6. **Cross-Computer Issues**: Follow the troubleshooting guide above when opening project on different computers
-7. **UI Responsiveness**: The application now includes proper DoEvents calls to prevent interface freezing
-8. **Cancel Functionality**: Users can cancel long-running upload operations using the Cancel button
+2. **Configuration**: Update S3 constants in `Common.bas`, and adjust `HIPPO_*` / patient constants inside the entry module (`BatchMain.bas`, `RealTimeFileAppendMain.bas`, etc.) before running
+3. **Initialization Required**: The application automatically calls `HippoBackend.Initialize()` at startup using constants from `Common.bas`
+4. **Upload Support**: Project supports single file and folder uploads (folder upload only in BatchMain.bas)
+5. **Error Handling**: Upload process includes progress monitoring and error handling
+6. **Path Issues**: If encountering DLL loading problems, check if lib directory exists and contains all required DLL files
+7. **Cross-Computer Issues**: Follow the troubleshooting guide above when opening project on different computers
+8. **UI Responsiveness**: The application now includes proper DoEvents calls to prevent interface freezing
+9. **Cancel Functionality**: Users can cancel long-running upload operations using the Cancel button
 
