@@ -26,12 +26,12 @@ Public Enum FileOperationType
 End Enum
 
 ' HippoClinic configuration constants
-Public Const HIPPO_BASE_URL As String = "https://hippoclinic.com"
+Public Const HIPPO_BASE_URL As String = "https://dev.hippoclinic.com"
 
 ' S3 configuration constants
 ' For prod running, do not change it here. In our current prod settings,
 ' the prod bucket is called "hippoclinic-staging". We will change it later.
-Public Const S3_BUCKET As String = "hippoclinic-staging"
+Public Const S3_BUCKET As String = "hippoclinic-dev"
 Public Const S3_REGION As String = "us-west-1"
 
 ' Windows API declarations (used by monitoring loops)
