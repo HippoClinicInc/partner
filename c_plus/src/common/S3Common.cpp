@@ -76,7 +76,7 @@ String extractFileName(const String& objectKey) {
 }
 
 // AsyncUploadManager::addUpload implementation
-String AsyncUploadManager::addUpload(const String& uploadId, const String& localFilePath, const String& s3ObjectKey, const String& patientId) {
+String AsyncUploadManager::addUpload(const String& uploadId, const String& localFilePath, const String& s3ObjectKey, const String& patientId, const String& region, const String& bucketName) {
     std::lock_guard<std::mutex> lock(mutex_);
     
     // Step 1: Clean up uploads older than 3 days
@@ -127,6 +127,8 @@ String AsyncUploadManager::addUpload(const String& uploadId, const String& local
     progress->localFilePath = localFilePath;
     progress->s3ObjectKey = s3ObjectKey;
     progress->patientId = patientId;
+    progress->region = region;
+    progress->bucketName = bucketName;
     
     // Extract dataId from uploadId (format: "dataId_timestamp")
     size_t separatorPos = uploadId.find(UPLOAD_ID_SEPARATOR);

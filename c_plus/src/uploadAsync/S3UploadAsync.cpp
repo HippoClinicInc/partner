@@ -1,25 +1,9 @@
 #include "../common/S3Common.h"
 #include "../common/request/s3_client_manager.h"
-#include <queue>
 
-// Global upload task queue structure
-// Stores information for a single upload request to be processed by worker thread
-struct UploadTask {
-    String uploadId;
-    String region;
-    String bucketName;
-    String objectKey;
-    String localFilePath;
-    String dataId;
-    String patientId;
-};
-
-// Global upload queue and worker thread management
-// Architecture: Single persistent worker thread + thread-safe task queue
+// Global worker thread management
+// Architecture: Single persistent worker thread + thread-safe task queue in AsyncUploadManager
 // Benefits: Avoids thread creation overhead, ensures serial execution, auto-recovery
-static std::queue<UploadTask> g_uploadQueue;       // Thread-safe FIFO queue for pending upload tasks
-static std::mutex g_queueMutex;                    // Protects access to g_uploadQueue
-static std::condition_variable g_queueCondition;   // Notifies worker thread when tasks are available
 static std::atomic<bool> g_workerRunning(false);   // Flag: true if worker thread is running
 static std::atomic<bool> g_shouldShutdown(false);  // Flag: signals worker thread to gracefully shutdown
 static std::thread g_workerThread;                 // The single persistent worker thread object
@@ -29,18 +13,19 @@ static std::mutex g_heartbeatMutex;                // Protects access to g_lastH
 
 // Upload processing function
 // This function handles the actual file upload to S3, called by the worker thread
-void asyncUploadWorker(const String& uploadId,
-                      const String& region,
-                      const String& bucketName,
-                      const String& objectKey,
-                      const String& localFilePath,
-                      const String& dataId,
-                      const String& patientId) {
-
+void asyncUploadWorker(const String& uploadId) {
     // Step 1: Get upload progress tracker from manager
     auto& manager = AsyncUploadManager::getInstance();
     auto progress = manager.getUpload(uploadId);
     if (!progress) return;
+    
+    // Extract parameters from progress
+    const String& region = progress->region;
+    const String& bucketName = progress->bucketName;
+    const String& objectKey = progress->s3ObjectKey;
+    const String& localFilePath = progress->localFilePath;
+    const String& dataId = progress->dataId;
+    const String& patientId = progress->patientId;
 
     try {
         // Step 2: Initialize upload progress and set status to uploading
@@ -362,41 +347,39 @@ void uploadWorkerThread() {
             }
             
             // Wait for and get next task from queue
-            UploadTask task;
+            String uploadId;
             {
-                std::unique_lock<std::mutex> lock(g_queueMutex);
+                auto& manager = AsyncUploadManager::getInstance();
+                std::unique_lock<std::mutex> lock(manager.getQueueMutex());
                 
                 // Wait with timeout (5 seconds) to check shutdown flag periodically
                 // This allows the thread to exit promptly when shutdown is requested
-                bool hasTask = g_queueCondition.wait_for(lock, std::chrono::seconds(5), [] {
-                    return !g_uploadQueue.empty() || g_shouldShutdown.load();
+                bool hasTask = manager.getQueueCondition().wait_for(lock, std::chrono::seconds(5), [&manager] {
+                    return !manager.isQueueEmpty() || g_shouldShutdown.load();
                 });
                 
                 // Exit condition: shutdown requested and no more tasks to process
-                if (g_shouldShutdown.load() && g_uploadQueue.empty()) {
+                if (g_shouldShutdown.load() && manager.isQueueEmpty()) {
                     break;
                 }
                 
                 // No task available (timeout occurred), continue to next iteration
                 // This updates heartbeat and checks shutdown flag again
-                if (!hasTask || g_uploadQueue.empty()) {
+                if (!hasTask || manager.isQueueEmpty()) {
                     continue;
                 }
                 
                 // Dequeue next task for processing
-                task = g_uploadQueue.front();
-                g_uploadQueue.pop();
+                uploadId = manager.dequeueUpload();
                 
-                AWS_LOGSTREAM_INFO("S3Upload", "Worker thread picked up task: " << task.uploadId 
-                                  << ", remaining queue size: " << g_uploadQueue.size());
+                AWS_LOGSTREAM_INFO("S3Upload", "Worker thread picked up task: " << uploadId 
+                                  << ", remaining queue size: " << manager.getQueueSize());
             }
             // Lock is released here, allowing new tasks to be enqueued while we process this one
             
             // Process the upload task (this may take a while for large files)
             // All S3 upload logic is handled in asyncUploadWorker()
-            asyncUploadWorker(task.uploadId, task.region, task.bucketName, 
-                            task.objectKey, task.localFilePath, 
-                            task.dataId, task.patientId);
+            asyncUploadWorker(uploadId);
             
         } catch (const std::exception& e) {
             AWS_LOGSTREAM_ERROR("S3Upload", "Exception in worker thread: " << e.what());
@@ -529,9 +512,17 @@ extern "C" S3UPLOAD_API const char* __stdcall UploadFileAsync(
         auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
         String uploadId = getUploadId(dataId, timestamp);
 
-        // Step 4: Register upload with manager for progress tracking and queue
+        // Step 4: Convert C-style parameters to C++ strings (avoid pointer lifetime issues)
+        // VB6 passes const char* pointers that may become invalid after this function returns
+        String strRegion = region;
+        String strBucketName = bucketName;
+        String strObjectKey = objectKey;
+        String strLocalFilePath = localFilePath;
+        String strPatientId = patientId;
+
+        // Step 5: Register upload with manager for progress tracking
         // uploadDataName and dataId will be automatically extracted inside addUpload
-        manager.addUpload(uploadId, localFilePath, objectKey, patientId);
+        manager.addUpload(uploadId, strLocalFilePath, strObjectKey, strPatientId, strRegion, strBucketName);
 
         // Save operation type to progress
         if (auto uploadProgress = manager.getUpload(uploadId)) {
@@ -545,47 +536,21 @@ extern "C" S3UPLOAD_API const char* __stdcall UploadFileAsync(
             AWS_LOGSTREAM_ERROR("S3Upload", "Failed to get upload progress for uploadId: " << uploadId);
         }
 
-        // Step 5: Ensure worker thread is running (start if not running or restart if dead)
+        // Step 6: Ensure worker thread is running (start if not running or restart if dead)
         // This performs health check via heartbeat monitoring (30s timeout)
         // If thread is dead or not started, this will create/restart it automatically
         ensureWorkerThreadRunning();
 
-        // Step 6: Convert C-style parameters to C++ strings (avoid pointer lifetime issues)
-        // VB6 passes const char* pointers that may become invalid after this function returns
-        // We copy them to std::string for safe storage in the queue
-        String strRegion = region;
-        String strBucketName = bucketName;
-        String strObjectKey = objectKey;
-        String strLocalFilePath = localFilePath;
-        String strDataId = dataId;
-        String strPatientId = patientId;
-
-        // Step 7: Construct upload task and add to queue
+        // Step 7: Enqueue upload ID to queue
         // Critical section: Queue access must be protected by mutex
-        {
-            std::lock_guard<std::mutex> lock(g_queueMutex);
-            
-            // Build task object with all upload parameters
-            UploadTask task;
-            task.uploadId = uploadId;
-            task.region = strRegion;
-            task.bucketName = strBucketName;
-            task.objectKey = strObjectKey;
-            task.localFilePath = strLocalFilePath;
-            task.dataId = strDataId;
-            task.patientId = strPatientId;
-            
-            // Enqueue task - will be processed by worker thread in FIFO order
-            g_uploadQueue.push(task);
-            AWS_LOGSTREAM_INFO("S3Upload", "Task enqueued: " << uploadId 
-                              << ", total pending tasks: " << g_uploadQueue.size());
-        }
-        // Lock released here
+        manager.enqueueUpload(uploadId);
+        AWS_LOGSTREAM_INFO("S3Upload", "Task enqueued: " << uploadId 
+                          << ", total pending tasks: " << manager.getQueueSize());
         
         // Step 7.1: Wake up worker thread to process the newly added task
         // If worker is waiting on condition variable, this will wake it immediately
         // If worker is busy processing, this has no effect (worker will see new task after current one)
-        g_queueCondition.notify_one();
+        manager.getQueueCondition().notify_one();
 
         // Step 8: Return success response with upload ID
         // Note: Upload hasn't started yet, it's just queued
@@ -627,7 +592,8 @@ extern "C" S3UPLOAD_API void __stdcall ShutdownUploadWorker() {
     
     // Wake up worker thread if it's waiting on condition variable
     // This ensures the thread can check shutdown flag promptly
-    g_queueCondition.notify_all();
+    auto& manager = AsyncUploadManager::getInstance();
+    manager.getQueueCondition().notify_all();
     
     // Clean up thread handle
     std::lock_guard<std::mutex> lock(g_workerThreadMutex);
@@ -640,23 +606,6 @@ extern "C" S3UPLOAD_API void __stdcall ShutdownUploadWorker() {
     // Update running flag
     g_workerRunning = false;
     AWS_LOGSTREAM_INFO("S3Upload", "Upload worker thread shutdown complete");
-}
-
-// Get the current upload queue size
-// 
-// Purpose: Query how many upload tasks are pending in the queue
-// Use case: Monitor queue depth, implement UI progress indicators, etc.
-//
-// Returns: Number of tasks waiting to be processed (does not include currently uploading task)
-// Thread-safety: Safe to call from any thread
-//
-// VB6 Usage:
-//   Dim queueSize As Integer
-//   queueSize = GetUploadQueueSize()
-//   Debug.Print "Pending uploads: " & queueSize
-extern "C" S3UPLOAD_API int __stdcall GetUploadQueueSize() {
-    std::lock_guard<std::mutex> lock(g_queueMutex);
-    return static_cast<int>(g_uploadQueue.size());
 }
 
 // Get async upload status as byte array - safer for VB6 interop
