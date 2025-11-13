@@ -4,6 +4,7 @@
 // Global worker thread management
 // Architecture: Single persistent worker thread + thread-safe task queue in AsyncUploadManager
 // Benefits: Avoids thread creation overhead, ensures serial execution, auto-recovery
+static const int WORKER_THREAD_HEARTBEAT_TIMEOUT_SECONDS = 30;  // Heartbeat timeout threshold in seconds
 static std::atomic<bool> g_workerRunning(false);   // Flag: true if worker thread is running
 static std::atomic<bool> g_shouldShutdown(false);  // Flag: signals worker thread to gracefully shutdown
 static std::thread g_workerThread;                 // The single persistent worker thread object
@@ -419,12 +420,12 @@ void ensureWorkerThreadRunning() {
         // Thread claims to be running, verify by checking heartbeat
         std::lock_guard<std::mutex> hbLock(g_heartbeatMutex);
         auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - g_lastHeartbeat).count();
+        auto elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(now - g_lastHeartbeat).count();
         
-        // Heartbeat timeout threshold: 30 seconds
-        // Worker thread updates heartbeat every ~5 seconds, so 30s means thread is dead/hung
-        if (elapsed > 30) {
-            AWS_LOGSTREAM_ERROR("S3Upload", "Worker thread heartbeat timeout (" << elapsed 
+        // Heartbeat timeout threshold: WORKER_THREAD_HEARTBEAT_TIMEOUT_SECONDS seconds
+        // Worker thread updates heartbeat every ~5 seconds, so timeout means thread is dead/hung
+        if (elapsedSeconds > WORKER_THREAD_HEARTBEAT_TIMEOUT_SECONDS) {
+            AWS_LOGSTREAM_ERROR("S3Upload", "Worker thread heartbeat timeout (" << elapsedSeconds 
                                << " seconds), will restart");
             needStart = true;
             g_workerRunning = false;
