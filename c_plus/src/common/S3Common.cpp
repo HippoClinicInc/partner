@@ -122,7 +122,7 @@ String AsyncUploadManager::addUpload(const String& uploadId, const String& local
     }
     
     // Step 2: Add new upload
-    auto progress = std::make_shared<AsyncUploadProgress>();
+    auto progress = std::make_shared<FileUploadTaskInfo>();
     progress->uploadId = uploadId;
     progress->localFilePath = localFilePath;
     progress->s3ObjectKey = s3ObjectKey;
