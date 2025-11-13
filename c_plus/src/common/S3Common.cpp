@@ -155,7 +155,7 @@ const char* InitializeAwsSDK() {
 
     try {
         // Set log level (can be adjusted as needed)
-        g_options.loggingOptions.logLevel = Aws::Utils::Logging::LogLevel::Warn;
+        g_options.loggingOptions.logLevel = Aws::Utils::Logging::LogLevel::Info;
 
         // Initialize AWS SDK
         Aws::InitAPI(g_options);

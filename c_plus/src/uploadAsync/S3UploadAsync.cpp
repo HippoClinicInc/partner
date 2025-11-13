@@ -355,26 +355,29 @@ void uploadWorkerThread() {
                 
                 // Wait with timeout (5 seconds) to check shutdown flag periodically
                 // This allows the thread to exit promptly when shutdown is requested
+                // Note: Directly access queue in lambda to avoid deadlock (don't call isQueueEmpty() which tries to lock again)
                 bool hasTask = manager.getQueueCondition().wait_for(lock, std::chrono::seconds(5), [&manager] {
-                    return !manager.isQueueEmpty() || g_shouldShutdown.load();
+                    // Access queue directly through internal method to avoid deadlock
+                    return manager.getQueueSizeInternal() > 0 || g_shouldShutdown.load();
                 });
                 
                 // Exit condition: shutdown requested and no more tasks to process
-                if (g_shouldShutdown.load() && manager.isQueueEmpty()) {
+                // Directly check queue size to avoid deadlock
+                if (g_shouldShutdown.load() && manager.getQueueSizeInternal() == 0) {
                     break;
                 }
                 
                 // No task available (timeout occurred), continue to next iteration
                 // This updates heartbeat and checks shutdown flag again
-                if (!hasTask || manager.isQueueEmpty()) {
+                if (!hasTask || manager.getQueueSizeInternal() == 0) {
                     continue;
                 }
                 
-                // Dequeue next task for processing
-                uploadId = manager.dequeueUpload();
+                // Dequeue next task for processing (directly access queue to avoid deadlock)
+                uploadId = manager.dequeueUploadInternal();
                 
                 AWS_LOGSTREAM_INFO("S3Upload", "Worker thread picked up task: " << uploadId 
-                                  << ", remaining queue size: " << manager.getQueueSize());
+                                  << ", remaining queue size: " << manager.getQueueSizeInternal());
             }
             // Lock is released here, allowing new tasks to be enqueued while we process this one
             

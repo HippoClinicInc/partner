@@ -312,6 +312,25 @@ public:
     std::mutex& getQueueMutex() {
         return queueMutex_;
     }
+    
+    // Internal methods that assume lock is already held (for use within locked sections)
+    // These methods do NOT acquire locks and should only be called when queueMutex_ is already locked
+    size_t getQueueSizeInternal() const {
+        return uploadQueue_.size();
+    }
+    
+    bool isQueueEmptyInternal() const {
+        return uploadQueue_.empty();
+    }
+    
+    String dequeueUploadInternal() {
+        if (uploadQueue_.empty()) {
+            return "";
+        }
+        String uploadId = uploadQueue_.front();
+        uploadQueue_.pop();
+        return uploadId;
+    }
 };
 
 // Global variables (extern declarations)
