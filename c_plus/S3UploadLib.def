@@ -3,4 +3,3 @@ SetCredential
 UploadFileSync
 UploadFileAsync
 GetAsyncUploadStatusBytes
-ShutdownUploadWorker

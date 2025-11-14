@@ -365,8 +365,6 @@ extern "C" {
     S3UPLOAD_API long __stdcall GetS3FileSize(const char* filePath);
     S3UPLOAD_API const char* __stdcall SetCredential(const char* hippoApiUrl, const char* userName, const char* password);
     
-    // Upload worker thread management
-    S3UPLOAD_API void __stdcall ShutdownUploadWorker();
 }
 
 // Internal function declarations
