@@ -1,5 +1,4 @@
 EXPORTS
 SetCredential
-UploadFileSync
 UploadFileAsync
 GetAsyncUploadStatusBytes
