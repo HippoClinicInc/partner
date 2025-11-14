@@ -59,16 +59,7 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-echo Step 2: Compiling sync upload source file
-cl /std:c++14 /EHsc /MD /c /DS3UPLOAD_EXPORTS /I"aws-sdk-cpp\include" /I"vcpkg\installed\x86-windows\include" /Fo"build\S3UploadSync.obj" src\uploadSync\S3UploadSync.cpp
-
-if %ERRORLEVEL% neq 0 (
-    echo Compilation of S3UploadSync.cpp failed!
-    pause
-    exit /b 1
-)
-
-echo Step 3: Compiling async upload source file
+echo Step 2: Compiling async upload source file
 cl /std:c++14 /EHsc /MD /c /DS3UPLOAD_EXPORTS /I"aws-sdk-cpp\include" /I"vcpkg\installed\x86-windows\include" /Fo"build\S3UploadAsync.obj" src\uploadAsync\S3UploadAsync.cpp
 
 if %ERRORLEVEL% neq 0 (
@@ -77,7 +68,7 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-echo Step 4: Compiling HippoClient source file
+echo Step 3: Compiling HippoClient source file
 cl /std:c++14 /EHsc /MD /c /DS3UPLOAD_EXPORTS /I"aws-sdk-cpp\include" /I"vcpkg\installed\x86-windows\include" /Fo"build\hippo_client.obj" src\common\request\hippo_client.cpp
 
 if %ERRORLEVEL% neq 0 (
@@ -86,7 +77,7 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-echo Step 5: Compiling S3ClientManager source file
+echo Step 4: Compiling S3ClientManager source file
 cl /std:c++14 /EHsc /MD /c /DS3UPLOAD_EXPORTS /I"aws-sdk-cpp\include" /I"vcpkg\installed\x86-windows\include" /Fo"build\s3_client_manager.obj" src\common\request\s3_client_manager.cpp
 
 if %ERRORLEVEL% neq 0 (
@@ -95,7 +86,7 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-echo Step 6: Compiling main source file
+echo Step 5: Compiling main source file
 cl /std:c++14 /EHsc /MD /c /DS3UPLOAD_EXPORTS /I"aws-sdk-cpp\include" /I"vcpkg\installed\x86-windows\include" /Fo"build\main.obj" src\main.cpp
 
 if %ERRORLEVEL% neq 0 (
@@ -105,8 +96,8 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo.
-echo Step 7: Linking to create DLL...
-link /DLL /OUT:"build\S3UploadLib.dll" "build\S3Common.obj" "build\S3UploadSync.obj" "build\S3UploadAsync.obj" "build\hippo_client.obj" "build\s3_client_manager.obj" "build\main.obj" /LIBPATH:"aws-sdk-cpp\lib" /LIBPATH:"vcpkg\installed\x86-windows\lib" aws-cpp-sdk-core.lib aws-cpp-sdk-s3.lib aws-c-common.lib aws-c-auth.lib aws-c-cal.lib aws-c-compression.lib aws-c-event-stream.lib aws-c-http.lib aws-c-io.lib aws-c-mqtt.lib aws-c-s3.lib aws-c-sdkutils.lib aws-checksums.lib aws-crt-cpp.lib zlib.lib libcurl.lib kernel32.lib user32.lib advapi32.lib ws2_32.lib /DEF:S3UploadLib.def
+echo Step 6: Linking to create DLL...
+link /DLL /OUT:"build\S3UploadLib.dll" "build\S3Common.obj" "build\S3UploadAsync.obj" "build\hippo_client.obj" "build\s3_client_manager.obj" "build\main.obj" /LIBPATH:"aws-sdk-cpp\lib" /LIBPATH:"vcpkg\installed\x86-windows\lib" aws-cpp-sdk-core.lib aws-cpp-sdk-s3.lib aws-c-common.lib aws-c-auth.lib aws-c-cal.lib aws-c-compression.lib aws-c-event-stream.lib aws-c-http.lib aws-c-io.lib aws-c-mqtt.lib aws-c-s3.lib aws-c-sdkutils.lib aws-checksums.lib aws-crt-cpp.lib zlib.lib libcurl.lib kernel32.lib user32.lib advapi32.lib ws2_32.lib /DEF:S3UploadLib.def
 
 if %ERRORLEVEL% neq 0 (
     echo Linking failed!
@@ -114,7 +105,7 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-echo Step 8: Copying AWS SDK DLLs to build directory...
+echo Step 7: Copying AWS SDK DLLs to build directory...
 copy "aws-sdk-cpp\bin\*.dll" "build\" >nul 2>&1
 copy "vcpkg\installed\x86-windows\bin\*.dll" "build\" >nul 2>&1
 echo DLLs copied to build directory
