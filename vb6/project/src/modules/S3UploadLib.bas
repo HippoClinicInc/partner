@@ -18,19 +18,6 @@ Declare Function SetCredential Lib "S3UploadLib.dll" ( _
     ByVal password As String _
 ) As String
 
-' Return type: JSON string
-' The code is corresponds to the error code constants above
-' { "code": 0, "message": "success" }
-Declare Function UploadFileSync Lib "S3UploadLib.dll" ( _
-    ByVal accessKey As String, _
-    ByVal secretKey As String, _
-    ByVal sessionToken As String, _
-    ByVal region As String, _
-    ByVal bucketName As String, _
-    ByVal objectKey As String, _
-    ByVal localFilePath As String _
-) As String
-
 ' Start asynchronous upload to S3
 ' Return value: JSON string with upload ID on success, error on failure
 Declare Function UploadFileAsync Lib "S3UploadLib.dll" ( _

@@ -62,10 +62,8 @@ c_plus/
 │   ├── common/                 # Common utilities
 │   │   ├── S3Common.cpp        # S3 common functionality implementation
 │   │   └── S3Common.h          # S3 common functionality header
-│   ├── uploadAsync/            # Asynchronous upload implementation
-│   │   └── S3UploadAsync.cpp   # Async S3 upload functionality
-│   └── uploadSync/             # Synchronous upload implementation
-│       └── S3UploadSync.cpp    # Sync S3 upload functionality
+│   └── uploadAsync/            # Asynchronous upload implementation
+│       └── S3UploadAsync.cpp   # Async S3 upload functionality
 ├── build/                      # Build output directory (after build)
 │   ├── S3UploadLib.dll         # Generated DLL
 │   ├── S3UploadLib.lib         # Generated import library

@@ -101,7 +101,7 @@ Uses module-level variables for configuration state, requiring initialization be
 - Support for both permanent and temporary AWS credentials
 - File existence and size validation
 - Comprehensive error code system
-- Simple and advanced upload methods
+- Asynchronous upload methods with status monitoring
 - Automatic thread management: Upload worker thread automatically shuts down after 15 minutes of inactivity
 - Auto-recovery: Thread automatically restarts when new upload tasks are added
 
