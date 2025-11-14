@@ -17,7 +17,7 @@ static std::mutex g_lastTaskTimeMutex;             // Protects access to g_lastT
 
 // Upload processing function
 // This function handles the actual file upload to S3, called by the worker thread
-void asyncUploadWorker(const String& uploadId) {
+void updateSingleFile(const String& uploadId) {
     // Step 1: Get upload progress tracker from manager
     auto& manager = AsyncUploadManager::getInstance();
     auto progress = manager.getUpload(uploadId);
@@ -412,8 +412,8 @@ void uploadWorkerThread() {
             // Lock is released here, allowing new tasks to be enqueued while we process this one
             
             // Process the upload task (this may take a while for large files)
-            // All S3 upload logic is handled in asyncUploadWorker()
-            asyncUploadWorker(uploadId);
+            // All S3 upload logic is handled in updateSingleFile()
+            updateSingleFile(uploadId);
             
             // Update last task processed time after completing a task
             // This resets the idle timeout counter
