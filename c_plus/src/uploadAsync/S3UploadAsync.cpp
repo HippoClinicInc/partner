@@ -4,14 +4,10 @@
 // Global worker thread management
 // Architecture: Single persistent worker thread + thread-safe task queue in AsyncUploadManager
 // Benefits: Avoids thread creation overhead, ensures serial execution, auto-recovery
-static const int WORKER_THREAD_HEARTBEAT_TIMEOUT_SECONDS = 30;  // Heartbeat timeout threshold in seconds
 static const int WORKER_THREAD_IDLE_TIMEOUT_MINUTES = 15;  // Idle timeout: thread auto-shutdown after 15 minutes of inactivity
 static std::atomic<bool> g_workerRunning(false);   // Flag: true if worker thread is running
-static std::atomic<bool> g_shouldShutdown(false);  // Flag: signals worker thread to gracefully shutdown (for manual shutdown only)
 static std::thread g_workerThread;                 // The single persistent worker thread object
 static std::mutex g_workerThreadMutex;             // Protects worker thread creation/restart operations
-static std::chrono::steady_clock::time_point g_lastHeartbeat;  // Timestamp of last worker thread heartbeat
-static std::mutex g_heartbeatMutex;                // Protects access to g_lastHeartbeat
 static std::chrono::steady_clock::time_point g_lastTaskProcessedTime;  // Timestamp of last task completion
 static std::mutex g_lastTaskTimeMutex;             // Protects access to g_lastTaskProcessedTime
 
@@ -329,12 +325,10 @@ void updateSingleFile(const String& uploadId) {
 // This is the entry point for the single persistent upload worker thread.
 // 
 // Thread lifecycle:
-// 1. Started by ensureWorkerThreadRunning() on first upload or after thread failure
-// 2. Runs in loop until g_shouldShutdown flag is set OR idle timeout (15 minutes) is reached
-// 3. Updates heartbeat every 5 seconds for health monitoring
-// 4. Waits for tasks from queue and processes them serially
-// 5. Auto-exits when idle for 15 minutes (no tasks processed)
-// 6. Gracefully exits when shutdown is requested and queue is empty
+// 1. Started by ensureWorkerThreadRunning() on first upload or after thread shutdown
+// 2. Runs in loop until idle timeout (15 minutes) is reached
+// 3. Waits for tasks from queue and processes them serially
+// 4. Auto-exits when idle for 15 minutes (no tasks processed)
 //
 // Error handling:
 // - Individual task failures are caught and logged, but don't terminate the thread
@@ -348,27 +342,20 @@ void uploadWorkerThread() {
         g_lastTaskProcessedTime = std::chrono::steady_clock::now();
     }
     
-    while (!g_shouldShutdown.load()) {
+    while (true) {
         try {
-            // Update heartbeat timestamp for health monitoring
-            // ensureWorkerThreadRunning() checks this to detect thread failures
-            {
-                std::lock_guard<std::mutex> lock(g_heartbeatMutex);
-                g_lastHeartbeat = std::chrono::steady_clock::now();
-            }
-            
             // Check idle timeout: if no task processed for 15 minutes, auto-shutdown
             {
                 std::lock_guard<std::mutex> lock(g_lastTaskTimeMutex);
                 auto now = std::chrono::steady_clock::now();
-                auto idleDuration = std::chrono::duration_cast<std::chrono::minutes>(now - g_lastTaskProcessedTime);
+                auto idleDurationMinutes = std::chrono::duration_cast<std::chrono::minutes>(now - g_lastTaskProcessedTime);
                 
-                if (idleDuration.count() >= WORKER_THREAD_IDLE_TIMEOUT_MINUTES) {
+                if (idleDurationMinutes.count() >= WORKER_THREAD_IDLE_TIMEOUT_MINUTES) {
                     // Check if queue is empty before auto-shutdown
                     auto& manager = AsyncUploadManager::getInstance();
                     std::lock_guard<std::mutex> queueLock(manager.getQueueMutex());
                     if (manager.getQueueSizeInternal() == 0) {
-                        AWS_LOGSTREAM_INFO("S3Upload", "Worker thread idle for " << idleDuration.count() 
+                        AWS_LOGSTREAM_INFO("S3Upload", "Worker thread idle for " << idleDurationMinutes.count()
                                           << " minutes, auto-shutting down (queue is empty)");
                         break;
                     }
@@ -383,22 +370,16 @@ void uploadWorkerThread() {
                 auto& manager = AsyncUploadManager::getInstance();
                 std::unique_lock<std::mutex> lock(manager.getQueueMutex());
                 
-                // Wait with timeout (5 seconds) to check shutdown flag and idle timeout periodically
-                // This allows the thread to exit promptly when shutdown is requested or idle timeout reached
+                // Wait with timeout (5 seconds) to check idle timeout periodically
+                // This allows the thread to exit promptly when idle timeout is reached
                 // Note: Directly access queue in lambda to avoid deadlock (don't call isQueueEmpty() which tries to lock again)
                 bool hasTask = manager.getQueueCondition().wait_for(lock, std::chrono::seconds(5), [&manager] {
                     // Access queue directly through internal method to avoid deadlock
-                    return manager.getQueueSizeInternal() > 0 || g_shouldShutdown.load();
+                    return manager.getQueueSizeInternal() > 0;
                 });
                 
-                // Exit condition: shutdown requested and no more tasks to process
-                // Directly check queue size to avoid deadlock
-                if (g_shouldShutdown.load() && manager.getQueueSizeInternal() == 0) {
-                    break;
-                }
-                
                 // No task available (timeout occurred), continue to next iteration
-                // This updates heartbeat and checks shutdown flag/idle timeout again
+                // This checks idle timeout again
                 if (!hasTask || manager.getQueueSizeInternal() == 0) {
                     continue;
                 }
@@ -436,58 +417,21 @@ void uploadWorkerThread() {
     AWS_LOGSTREAM_INFO("S3Upload", "Upload worker thread stopped");
 }
 
-// Ensures the worker thread is running, starting or restarting it if necessary
-// This function implements automatic thread health monitoring and recovery.
+// Ensures the worker thread is running, starting it if necessary
+// This function checks if the thread is running and starts it if not.
 //
-// Health check mechanism:
+// Thread management:
 // 1. If g_workerRunning is false -> thread needs to be started
-// 2. If g_workerRunning is true -> check heartbeat timestamp
-//    - If heartbeat is older than 30 seconds -> thread is considered dead/hung
-//    - Automatically restart the thread to recover from failure
+// 2. If g_workerRunning is true -> thread is already running, no action needed
 //
-// Thread-safety: Protected by g_workerThreadMutex to prevent concurrent restarts
+// Thread-safety: Protected by g_workerThreadMutex to prevent concurrent starts
 void ensureWorkerThreadRunning() {
     std::lock_guard<std::mutex> lock(g_workerThreadMutex);
     
-    // Determine if thread needs to be started or restarted
-    bool needStart = false;
-    
+    // Check if thread needs to be started
     if (!g_workerRunning.load()) {
-        // Thread is not running (first start or after previous failure)
-        needStart = true;
-        AWS_LOGSTREAM_WARN("S3Upload", "Worker thread not running, will start/restart");
-    } else {
-        // Thread claims to be running, verify by checking heartbeat
-        std::lock_guard<std::mutex> hbLock(g_heartbeatMutex);
-        auto now = std::chrono::steady_clock::now();
-        auto elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(now - g_lastHeartbeat).count();
-        
-        // Heartbeat timeout threshold: WORKER_THREAD_HEARTBEAT_TIMEOUT_SECONDS seconds
-        // Worker thread updates heartbeat every ~5 seconds, so timeout means thread is dead/hung
-        if (elapsedSeconds > WORKER_THREAD_HEARTBEAT_TIMEOUT_SECONDS) {
-            AWS_LOGSTREAM_ERROR("S3Upload", "Worker thread heartbeat timeout (" << elapsedSeconds 
-                               << " seconds), will restart");
-            needStart = true;
-            g_workerRunning = false;
-            
-            // Clean up the dead thread handle
-            if (g_workerThread.joinable()) {
-                g_workerThread.detach(); // Detach dead thread (can't join a hung thread)
-            }
-        }
-    }
-    
-    // Start or restart worker thread if needed
-    if (needStart) {
-        // Reset flags for new thread
-        g_shouldShutdown = false;
+        // Thread is not running (first start or after previous shutdown)
         g_workerRunning = true;
-        
-        // Initialize heartbeat timestamp for the new thread
-        {
-            std::lock_guard<std::mutex> hbLock(g_heartbeatMutex);
-            g_lastHeartbeat = std::chrono::steady_clock::now();
-        }
         
         // Initialize last task processed time for the new thread
         // This ensures idle timeout starts from thread creation time
@@ -586,9 +530,8 @@ extern "C" S3UPLOAD_API const char* __stdcall UploadFileAsync(
             AWS_LOGSTREAM_ERROR("S3Upload", "Failed to get upload progress for uploadId: " << uploadId);
         }
 
-        // Step 6: Ensure worker thread is running (start if not running or restart if dead)
-        // This performs health check via heartbeat monitoring (30s timeout)
-        // If thread is dead or not started, this will create/restart it automatically
+        // Step 6: Ensure worker thread is running (start if not running)
+        // If thread is not started, this will create it automatically
         ensureWorkerThreadRunning();
 
         // Step 7: Enqueue upload ID to queue
