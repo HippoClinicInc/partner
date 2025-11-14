@@ -18,8 +18,6 @@ Declare Function SetCredential Lib "S3UploadLib.dll" ( _
     ByVal password As String _
 ) As String
 
-
-
 ' Start asynchronous upload to S3
 ' Return value: JSON string with upload ID on success, error on failure
 Declare Function UploadFileAsync Lib "S3UploadLib.dll" ( _
