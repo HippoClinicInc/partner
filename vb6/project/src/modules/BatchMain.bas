@@ -143,6 +143,5 @@ Sub Main()
         Debug.Print "ERROR: Upload process failed"
     End If
 
-
     Exit Sub
 End Sub

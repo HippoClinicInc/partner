@@ -102,6 +102,8 @@ Uses module-level variables for configuration state, requiring initialization be
 - File existence and size validation
 - Comprehensive error code system
 - Simple and advanced upload methods
+- Automatic thread management: Upload worker thread automatically shuts down after 15 minutes of inactivity
+- Auto-recovery: Thread automatically restarts when new upload tasks are added
 
 #### `JsonConverter.bas`
 **JSON Processing Library** - VBA-JSON v2.3.1 implementation:
@@ -572,4 +574,5 @@ For technical support or questions:
 7. **Cross-Computer Issues**: Follow the troubleshooting guide above when opening project on different computers
 8. **UI Responsiveness**: The application now includes proper DoEvents calls to prevent interface freezing
 9. **Cancel Functionality**: Users can cancel long-running upload operations using the Cancel button
+10. **Thread Management**: The upload worker thread automatically manages its lifecycle - it shuts down after 15 minutes of inactivity and automatically restarts when new upload tasks are added. No manual thread management is required.
 
