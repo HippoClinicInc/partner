@@ -17,8 +17,8 @@ project/
 ├── lib/                   # Library files directory
 │   ├── *.dll             # AWS SDK DLL files
 │   └── S3UploadLib.dll   # Custom S3 upload library
-├── Project1.vbp         # VB6 project file (Batch upload scenario - BatchMain.bas)
-├── Project2.vbp         # VB6 project file (Real-time append scenario - RealTimeFileAppendMain.bas)
+├── BatchUpload.vbp      # VB6 project file (Batch upload scenario - BatchMain.bas)
+├── RealTimeUpload.vbp   # VB6 project file (Real-time append scenario - RealTimeFileAppendMain.bas)
 └── README.md            # Project documentation
 ```
 
@@ -102,6 +102,8 @@ Uses module-level variables for configuration state, requiring initialization be
 - File existence and size validation
 - Comprehensive error code system
 - Asynchronous upload methods with status monitoring
+- Automatic thread management: Upload worker thread automatically shuts down after 15 minutes of inactivity
+- Auto-recovery: Thread automatically restarts when new upload tasks are added
 
 #### `JsonConverter.bas`
 **JSON Processing Library** - VBA-JSON v2.3.1 implementation:
@@ -145,13 +147,13 @@ Uses module-level variables for configuration state, requiring initialization be
 
 This project includes two separate VB6 project files for different upload scenarios:
 
-### `Project1.vbp` - Batch Upload Scenario
+### `BatchUpload.vbp` - Batch Upload Scenario
 - **Main Module**: BatchMain.bas
 - **Purpose**: Traditional batch file and folder upload
 - **Use Case**: Upload single files or entire folders at once
 - **Features**: Complete upload workflow with GUI progress tracking
 
-### `Project2.vbp` - Real-Time File Append Scenario
+### `RealTimeUpload.vbp` - Real-Time File Append Scenario
 - **Main Module**: RealTimeFileAppendMain.bas
 - **Purpose**: Real-time incremental file append upload
 - **Use Case**: Upload single files with option to create new or append to existing dataId
@@ -205,12 +207,12 @@ You can find the installer in the `cpp_runtime` folder. click the `install_all.b
    
    **For Batch Upload:**
    ```
-   Open Project1.vbp with Visual Basic 6.0
+   Open BatchUpload.vbp with Visual Basic 6.0
    ```
    
    **For Real-Time File Append Upload:**
    ```
-   Open Project2.vbp with Visual Basic 6.0
+   Open RealTimeUpload.vbp with Visual Basic 6.0
    ```
 
 2. **Verify All Modules Are Loaded**
@@ -524,13 +526,13 @@ If files exist but VB6 doesn't load them:
 #### Method 3: Clean Project Loading
 1. Close VB6 completely
 2. Delete the `.vbw` file (VB6 workspace file)
-3. Reopen VB6 and load `Project1.vbp`
+3. Reopen VB6 and load `BatchUpload.vbp` or `RealTimeUpload.vbp`
 4. VB6 will recreate the workspace file with correct paths
 
 #### Method 4: Verify Correct Project File
 Make sure you're opening the correct project file for your use case:
-- `Project1.vbp` - For batch upload scenarios (BatchMain.bas)
-- `Project2.vbp` - For real-time append scenarios (RealTimeFileAppendMain.bas)
+- `BatchUpload.vbp` - For batch upload scenarios (BatchMain.bas)
+- `RealTimeUpload.vbp` - For real-time append scenarios (RealTimeFileAppendMain.bas)
 
 ### Prevention Tips
 1. **Complete File Copy**: Always copy the entire project directory including all subdirectories
@@ -572,4 +574,5 @@ For technical support or questions:
 7. **Cross-Computer Issues**: Follow the troubleshooting guide above when opening project on different computers
 8. **UI Responsiveness**: The application now includes proper DoEvents calls to prevent interface freezing
 9. **Cancel Functionality**: Users can cancel long-running upload operations using the Cancel button
+10. **Thread Management**: The upload worker thread automatically manages its lifecycle - it shuts down after 15 minutes of inactivity and automatically restarts when new upload tasks are added. No manual thread management is required.
 

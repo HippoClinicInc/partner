@@ -133,7 +133,7 @@ enum UploadStatus {
 
 // Async upload progress information structure
 // Contains all tracking data for a single upload operation
-struct AsyncUploadProgress {
+struct FileUploadTaskInfo {
     // Unique identifier for this upload
     String uploadId;
     // Current status of the upload
@@ -162,16 +162,25 @@ struct AsyncUploadProgress {
     // Operation mode
     FileOperationType fileOperationType;
 
+    // S3 upload parameters
+    String region;
+    String bucketName;
+
     // Constructor - initialize with default values
-    AsyncUploadProgress() : status(UPLOAD_PENDING), totalSize(0), shouldCancel(false), confirmationAttempted(false), fileOperationType(BATCH_CREATE) {}
+    FileUploadTaskInfo() : status(UPLOAD_PENDING), totalSize(0), shouldCancel(false), confirmationAttempted(false), fileOperationType(BATCH_CREATE) {}
 };
 
 // Async upload manager class - thread-safe singleton for managing multiple uploads
 // Provides centralized tracking and status management for concurrent file uploads
 class AsyncUploadManager {
 private:
-    mutable std::mutex mutex_;  // Mutex for thread-safe operations
-    std::unordered_map<String, std::shared_ptr<AsyncUploadProgress>> uploads_;  // Map of upload ID to progress info
+    mutable std::mutex upload_data_map_mutex_;  // Mutex for thread-safe operations
+    std::unordered_map<String, std::shared_ptr<FileUploadTaskInfo>> uploads_;  // Map of upload ID to progress info
+    
+    // Upload queue management
+    std::queue<String> uploadQueue_;  // FIFO queue for pending upload tasks (stores only uploadId)
+    mutable std::mutex queueMutex_;  // Protects access to uploadQueue_
+    std::condition_variable queueCondition_;  // Notifies worker thread when tasks are available
 
 public:
     // Constructor
@@ -188,20 +197,20 @@ public:
 
     // Add a new upload to tracking system
     // Returns the upload ID for reference
-    String addUpload(const String& uploadId, const String& localFilePath, const String& s3ObjectKey, const String& patientId);
+    String addUpload(const String& uploadId, const String& localFilePath, const String& s3ObjectKey, const String& patientId, const String& region, const String& bucketName);
 
     // Get upload progress information by ID
     // Returns shared_ptr to progress info or nullptr if not found
-    std::shared_ptr<AsyncUploadProgress> getUpload(const String& uploadId) {
-        std::lock_guard<std::mutex> lock(mutex_);
+    std::shared_ptr<FileUploadTaskInfo> getUpload(const String& uploadId) {
+        std::lock_guard<std::mutex> lock(upload_data_map_mutex_);
         auto it = uploads_.find(uploadId);
         return it != uploads_.end() ? it->second : nullptr;
     }
 
     // Get upload progress information by dataId
     // Returns shared_ptr to progress info or nullptr if not found
-    std::shared_ptr<AsyncUploadProgress> getUploadByDataId(const String& dataId) {
-        std::lock_guard<std::mutex> lock(mutex_);
+    std::shared_ptr<FileUploadTaskInfo> getUploadByDataId(const String& dataId) {
+        std::lock_guard<std::mutex> lock(upload_data_map_mutex_);
         String prefix = getUploadIdPrefixByDataId(dataId);
         for (auto& pair : uploads_) {
             if (pair.first.find(prefix) == 0) {
@@ -213,9 +222,9 @@ public:
 
     // Get all uploads that start with the given dataId
     // Returns a vector of all matching upload progress info
-    std::vector<std::shared_ptr<AsyncUploadProgress>> getAllUploadsByDataId(const String& dataId) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        std::vector<std::shared_ptr<AsyncUploadProgress>> result;
+    std::vector<std::shared_ptr<FileUploadTaskInfo>> getAllUploadsByDataId(const String& dataId) {
+        std::lock_guard<std::mutex> lock(upload_data_map_mutex_);
+        std::vector<std::shared_ptr<FileUploadTaskInfo>> result;
         String prefix = getUploadIdPrefixByDataId(dataId);
         for (auto& pair : uploads_) {
             if (pair.first.find(prefix) == 0) {
@@ -227,7 +236,7 @@ public:
 
     // Remove upload from tracking system (cleanup)
     void removeUpload(const String& uploadId) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(upload_data_map_mutex_);
         uploads_.erase(uploadId);
     }
 
@@ -235,7 +244,7 @@ public:
     // Thread-safe status updates for progress tracking
     void updateProgress(const String& uploadId, UploadStatus status,
                        const String& error = "") {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(upload_data_map_mutex_);
         auto it = uploads_.find(uploadId);
         if (it != uploads_.end()) {
             it->second->status = status;
@@ -248,13 +257,13 @@ public:
 public:
     // Get total number of uploads
     size_t getTotalUploads() const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(upload_data_map_mutex_);
         return uploads_.size();
     }
     
     // Get number of pending uploads
     size_t getPendingUploads() const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(upload_data_map_mutex_);
         size_t count = 0;
         for (const auto& pair : uploads_) {
             if (pair.second->status == UPLOAD_PENDING) {
@@ -262,6 +271,65 @@ public:
             }
         }
         return count;
+    }
+    
+    // Queue management methods
+    // Enqueue an upload ID to the queue
+    void enqueueUpload(const String& uploadId) {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        uploadQueue_.push(uploadId);
+    }
+    
+    // Dequeue an upload ID from the queue (returns empty string if queue is empty)
+    String dequeueUpload() {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        if (uploadQueue_.empty()) {
+            return "";
+        }
+        String uploadId = uploadQueue_.front();
+        uploadQueue_.pop();
+        return uploadId;
+    }
+    
+    // Get queue size
+    size_t getQueueSize() const {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        return uploadQueue_.size();
+    }
+    
+    // Check if queue is empty
+    bool isQueueEmpty() const {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        return uploadQueue_.empty();
+    }
+    
+    // Get condition variable reference for waiting
+    std::condition_variable& getQueueCondition() {
+        return queueCondition_;
+    }
+    
+    // Get queue mutex reference for waiting
+    std::mutex& getQueueMutex() {
+        return queueMutex_;
+    }
+    
+    // Internal methods that assume lock is already held (for use within locked sections)
+    // These methods do NOT acquire locks and should only be called when queueMutex_ is already locked
+    size_t getQueueSizeInternal() const {
+        return uploadQueue_.size();
+    }
+    
+    bool isQueueEmptyInternal() const {
+        return uploadQueue_.empty();
+    }
+    
+    String dequeueUploadInternal() {
+        if (uploadQueue_.empty()) {
+            return "";
+        }
+        String uploadId = uploadQueue_.front();
+        uploadQueue_.pop();
+        return uploadId;
     }
 };
 
@@ -296,6 +364,7 @@ extern "C" {
     S3UPLOAD_API int __stdcall FileExists(const char* filePath);
     S3UPLOAD_API long __stdcall GetS3FileSize(const char* filePath);
     S3UPLOAD_API const char* __stdcall SetCredential(const char* hippoApiUrl, const char* userName, const char* password);
+    
 }
 
 // Internal function declarations
