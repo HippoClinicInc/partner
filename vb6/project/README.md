@@ -101,7 +101,7 @@ Uses module-level variables for configuration state, requiring initialization be
 - Support for both permanent and temporary AWS credentials
 - File existence and size validation
 - Comprehensive error code system
-- Simple and advanced upload methods
+- Asynchronous upload methods with status monitoring
 
 #### `JsonConverter.bas`
 **JSON Processing Library** - VBA-JSON v2.3.1 implementation:
