@@ -480,16 +480,17 @@ extern "C" S3UPLOAD_API const char* __stdcall UploadFileAsync(
     }
 
     // Step 2.1: Check upload queue limit (max 100 uploads)
+    // Only count active uploads (excluding successful ones)
     auto& manager = AsyncUploadManager::getInstance();
-    size_t totalUploads = manager.getTotalUploads();
+    size_t totalActiveUploads = manager.getActiveUploads();
     
-    if (totalUploads >= MAX_UPLOAD_LIMIT) {
+    if (totalActiveUploads >= MAX_UPLOAD_LIMIT) {
         // Check if there are existing uploads with the same dataId
         auto existingUploads = manager.getAllUploadsByDataId(dataId);
         
         if (existingUploads.empty()) {
             // No existing uploads with same dataId, reject new upload
-            std::string errorMsg = "Upload queue is full (" + std::to_string(totalUploads) + 
+            std::string errorMsg = "Upload queue is full (" + std::to_string(totalActiveUploads) +
                                  " uploads). Please wait for some uploads to complete before trying again.";
             response = create_response(UPLOAD_FAILED, formatErrorMessage("Upload limit exceeded", errorMsg));
             AWS_LOGSTREAM_WARN("S3Upload", "Upload rejected due to queue limit: " << errorMsg);
