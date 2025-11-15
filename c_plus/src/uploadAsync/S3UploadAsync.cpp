@@ -482,7 +482,7 @@ extern "C" S3UPLOAD_API const char* __stdcall UploadFileAsync(
     // Step 2.1: Check upload queue limit (max 100 uploads)
     // Only count unfinished uploads (excluding successful ones)
     auto& manager = AsyncUploadManager::getInstance();
-    size_t totalUnfinishedUploads = manager.totalUnfinishedUploads();
+    size_t totalUnfinishedUploads = manager.getUnfinishedUploads();
     
     if (totalUnfinishedUploads >= MAX_UPLOAD_LIMIT) {
         // Check if there are existing uploads with the same dataId
