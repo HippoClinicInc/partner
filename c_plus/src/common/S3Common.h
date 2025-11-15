@@ -273,6 +273,20 @@ public:
         return count;
     }
     
+    // Get number of unfinished uploads (excluding successful ones)
+    // Returns count of uploads that are not in CONFIRM_SUCCESS status
+    // Note: UPLOAD_SUCCESS is still considered unfinished as it needs backend confirmation
+    size_t getUnfinishedUploads() const {
+        std::lock_guard<std::mutex> lock(upload_data_map_mutex_);
+        size_t count = 0;
+        for (const auto& pair : uploads_) {
+            if (pair.second->status != CONFIRM_SUCCESS) {
+                count++;
+            }
+        }
+        return count;
+    }
+    
     // Queue management methods
     // Enqueue an upload ID to the queue
     void enqueueUpload(const String& uploadId) {
@@ -364,7 +378,6 @@ extern "C" {
     S3UPLOAD_API int __stdcall FileExists(const char* filePath);
     S3UPLOAD_API long __stdcall GetS3FileSize(const char* filePath);
     S3UPLOAD_API const char* __stdcall SetCredential(const char* hippoApiUrl, const char* userName, const char* password);
-    
 }
 
 // Internal function declarations
