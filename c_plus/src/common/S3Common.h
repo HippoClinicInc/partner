@@ -273,10 +273,10 @@ public:
         return count;
     }
     
-    // Get number of active uploads (excluding successful ones)
+    // Get number of unfinished uploads (excluding successful ones)
     // Returns count of uploads that are not in CONFIRM_SUCCESS status
-    // Note: UPLOAD_SUCCESS is still considered active as it needs backend confirmation
-    size_t getActiveUploads() const {
+    // Note: UPLOAD_SUCCESS is still considered unfinished as it needs backend confirmation
+    size_t totalUnfinishedUploads() const {
         std::lock_guard<std::mutex> lock(upload_data_map_mutex_);
         size_t count = 0;
         for (const auto& pair : uploads_) {
