@@ -16,16 +16,6 @@
 #include <sys/time.h>
 #endif
 
-// Include protobuf headers - adjust paths as needed
-// Assuming protobuf files are generated and available
-// #include "hippo/common/s3_file.pb.h"
-// #include "hippo/web/device_data.pb.h"
-// #include "hippo/common/data_type.pb.h"
-// #include "hippo/common/common.pb.h"
-
-// For now, we'll use a simplified approach without full protobuf
-// In a real implementation, you would include the actual protobuf headers
-
 namespace fs = std::filesystem;
 
 MneDataHandler::MneDataHandler(const std::string& file_path, const std::string& patient_id,
