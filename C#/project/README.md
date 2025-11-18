@@ -50,9 +50,6 @@ dotnet build RealTimeUpload.csproj
 ```bash
 # Build and run
 dotnet run --project BatchUpload.csproj
-
-# Or run the compiled executable
-dotnet bin/Debug/net8.0/BatchUpload.dll
 ```
 
 The program will:
@@ -68,9 +65,6 @@ The program will:
 ```bash
 # Build and run
 dotnet run --project RealTimeUpload.csproj
-
-# Or run the compiled executable
-dotnet bin/Debug/net8.0/RealTimeUpload.dll
 ```
 
 The program will:
