@@ -78,7 +78,7 @@ public class BatchMain
             uploadFilePath = uploadFilePath.Substring(1, uploadFilePath.Length - 2);
         }
 
-        // 1.1. Validate file/folder exists
+        // 2.1. Validate file/folder exists
         if (!FileLib.FileOrFolderExists(uploadFilePath))
         {
             Console.WriteLine($"ERROR: Path does not exist: {uploadFilePath}");
