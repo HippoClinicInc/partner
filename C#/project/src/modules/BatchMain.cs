@@ -37,6 +37,9 @@ public class BatchMain
         const string DEFAULT_MRN = "123";
         const string DEFAULT_PATIENT_NAME = "Test api";
 
+        // Maximum wait time for upload monitoring (seconds)
+        const long UPLOAD_MAX_WAIT_TIME_SECONDS = 600; 
+
         string patientId;
         string dataId;
         string uploadFilePath;
@@ -61,28 +64,24 @@ public class BatchMain
 
         // 2. Get file path from user input and validate existence
         Console.Write("Please enter the file path to upload: ");
-        uploadFilePath = Console.ReadLine() ?? string.Empty;
-        if (!string.IsNullOrEmpty(uploadFilePath))
-        {
-            uploadFilePath = uploadFilePath.Trim();
-            // Remove quotes if present
-            if (uploadFilePath.Length > 1 && ((uploadFilePath.StartsWith("\"") && uploadFilePath.EndsWith("\"")) ||
-                                              (uploadFilePath.StartsWith("'") && uploadFilePath.EndsWith("'"))))
-            {
-                uploadFilePath = uploadFilePath.Substring(1, uploadFilePath.Length - 2);
-            }
-
-            // 1.1. Validate file/folder exists
-            if (!FileLib.FileOrFolderExists(uploadFilePath))
-            {
-                Console.WriteLine($"ERROR: Path does not exist: {uploadFilePath}");
-                return;
-            }
-        }
-
+        uploadFilePath = (Console.ReadLine() ?? string.Empty).Trim();
         if (string.IsNullOrEmpty(uploadFilePath))
         {
             Console.WriteLine("ERROR: No file path provided");
+            return;
+        }
+
+        // Remove quotes if present
+        if (uploadFilePath.Length > 1 && ((uploadFilePath.StartsWith("\"") && uploadFilePath.EndsWith("\"")) ||
+                                          (uploadFilePath.StartsWith("'") && uploadFilePath.EndsWith("'"))))
+        {
+            uploadFilePath = uploadFilePath.Substring(1, uploadFilePath.Length - 2);
+        }
+
+        // 1.1. Validate file/folder exists
+        if (!FileLib.FileOrFolderExists(uploadFilePath))
+        {
+            Console.WriteLine($"ERROR: Path does not exist: {uploadFilePath}");
             return;
         }
 
@@ -110,9 +109,9 @@ public class BatchMain
         IntPtr sdkInitResultPtr = S3UploadLib.SetCredential(Common.HippoBaseUrl, HIPPO_ACCOUNT, HIPPO_PASSWORD);
         sdkInitResult = S3UploadLib.PtrToString(sdkInitResultPtr);
 
-        using (JsonDocument doc = JsonDocument.Parse(sdkInitResult))
+        using (JsonDocument jsonDocument = JsonDocument.Parse(sdkInitResult))
         {
-            var root = doc.RootElement;
+            var root = jsonDocument.RootElement;
             if (root.TryGetProperty("code", out var codeElement))
             {
                 if (codeElement.GetInt64() != (long)UploadStatus.SDK_INIT_SUCCESS)
@@ -128,8 +127,6 @@ public class BatchMain
 
         // Determine upload type and execute upload
         isFolder = FileLib.IsPathFolder(uploadFilePath);
-        long maxWaitTime = 600; // Maximum wait time in seconds (10 minutes)
-
         if (isFolder)
         {
             // 6.1. Upload folder contents
@@ -147,7 +144,7 @@ public class BatchMain
                 Console.WriteLine();
                 Console.WriteLine("2. All folder uploads submitted, monitoring status...");
                 Console.WriteLine();
-                uploadSuccess = Common.MonitorMultipleUploadStatus(dataId, maxWaitTime);
+                uploadSuccess = Common.MonitorMultipleUploadStatus(dataId, UPLOAD_MAX_WAIT_TIME_SECONDS);
             }
         }
         else
@@ -167,7 +164,7 @@ public class BatchMain
                 totalFileSize = FileLib.GetLocalFileSize(uploadFilePath);
 
                 Console.WriteLine("Single file upload started, monitoring status...");
-                uploadSuccess = Common.MonitorUploadStatus(dataId, maxWaitTime);
+                uploadSuccess = Common.MonitorUploadStatus(dataId, UPLOAD_MAX_WAIT_TIME_SECONDS);
             }
         }
 

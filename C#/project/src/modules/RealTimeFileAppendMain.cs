@@ -41,6 +41,9 @@ public class RealTimeFileAppendMain
         // Patient configuration constants (for demo purposes)
         const string DEFAULT_MRN = "123";
         const string DEFAULT_PATIENT_NAME = "Test api";
+        
+        // Maximum wait time for upload monitoring (seconds)
+        const long UPLOAD_MAX_WAIT_TIME_SECONDS = 600; 
 
         string patientId;
         string dataId;
@@ -65,28 +68,24 @@ public class RealTimeFileAppendMain
 
         // 1. Get file path from user input and validate existence
         Console.Write("Please enter the file path to upload (real-time): ");
-        uploadFilePath = Console.ReadLine() ?? string.Empty;
-        if (!string.IsNullOrEmpty(uploadFilePath))
-        {
-            uploadFilePath = uploadFilePath.Trim();
-            // Remove quotes if present
-            if (uploadFilePath.Length > 1 && ((uploadFilePath.StartsWith("\"") && uploadFilePath.EndsWith("\"")) ||
-                                              (uploadFilePath.StartsWith("'") && uploadFilePath.EndsWith("'"))))
-            {
-                uploadFilePath = uploadFilePath.Substring(1, uploadFilePath.Length - 2);
-            }
-
-            // 1.1. Validate file/folder exists
-            if (!FileLib.FileOrFolderExists(uploadFilePath))
-            {
-                Console.WriteLine($"ERROR: Path does not exist: {uploadFilePath}");
-                return;
-            }
-        }
-
+        uploadFilePath = (Console.ReadLine() ?? string.Empty).Trim();
         if (string.IsNullOrEmpty(uploadFilePath))
         {
             Console.WriteLine("ERROR: No file path provided");
+            return;
+        }
+
+        // Remove quotes if present
+        if (uploadFilePath.Length > 1 && ((uploadFilePath.StartsWith("\"") && uploadFilePath.EndsWith("\"")) ||
+                                          (uploadFilePath.StartsWith("'") && uploadFilePath.EndsWith("'"))))
+        {
+            uploadFilePath = uploadFilePath.Substring(1, uploadFilePath.Length - 2);
+        }
+
+        // 1.1. Validate file/folder exists
+        if (!FileLib.FileOrFolderExists(uploadFilePath))
+        {
+            Console.WriteLine($"ERROR: Path does not exist: {uploadFilePath}");
             return;
         }
 
@@ -126,11 +125,7 @@ public class RealTimeFileAppendMain
         {
             // 4.1. Append mode: ask user to input existing dataId
             Console.Write("Please enter the existing dataId to append: ");
-            dataId = Console.ReadLine() ?? string.Empty;
-            if (!string.IsNullOrEmpty(dataId))
-            {
-                dataId = dataId.Trim();
-            }
+            dataId = (Console.ReadLine() ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(dataId))
             {
                 Console.WriteLine("ERROR: No dataId provided for append mode");
@@ -155,9 +150,9 @@ public class RealTimeFileAppendMain
         IntPtr sdkInitResultPtr = S3UploadLib.SetCredential(Common.HippoBaseUrl, HIPPO_ACCOUNT, HIPPO_PASSWORD);
         sdkInitResult = S3UploadLib.PtrToString(sdkInitResultPtr);
 
-        using (JsonDocument doc = JsonDocument.Parse(sdkInitResult))
+        using (JsonDocument jsonDocument = JsonDocument.Parse(sdkInitResult))
         {
-            var root = doc.RootElement;
+            var root = jsonDocument.RootElement;
             if (root.TryGetProperty("code", out var codeElement))
             {
                 if (codeElement.GetInt64() != (long)UploadStatus.SDK_INIT_SUCCESS)
@@ -167,8 +162,6 @@ public class RealTimeFileAppendMain
                 }
             }
         }
-
-        long maxWaitTime = 600; // Maximum wait time in seconds (10 minutes)
 
         // 6. Upload single file
         // Upload data name: abc.ds
@@ -184,7 +177,7 @@ public class RealTimeFileAppendMain
         {
             totalFileSize = FileLib.GetLocalFileSize(uploadFilePath);
             Console.WriteLine("Single file upload started (real-time), monitoring status...");
-            uploadSuccess = Common.MonitorUploadStatus(dataId, maxWaitTime);
+            uploadSuccess = Common.MonitorUploadStatus(dataId, UPLOAD_MAX_WAIT_TIME_SECONDS);
         }
 
         // 8. Upload process completed (confirmation and cleanup are handled automatically by C++ backend)

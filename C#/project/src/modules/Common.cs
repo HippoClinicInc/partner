@@ -133,9 +133,9 @@ public static class Common
             var startResponse = S3UploadLib.PtrToString(startResponsePtr);
             Console.WriteLine(startResponse);
 
-            using (JsonDocument doc = JsonDocument.Parse(startResponse))
+            using (JsonDocument jsonDocument = JsonDocument.Parse(startResponse))
             {
-                var root = doc.RootElement;
+                var root = jsonDocument.RootElement;
                 if (root.TryGetProperty("code", out var codeElement))
                 {
                     var startCode = codeElement.GetInt64();
@@ -189,9 +189,9 @@ public static class Common
                     Console.WriteLine($"Status response: {statusResponse}");
                     Console.WriteLine();
 
-                    using (JsonDocument doc = JsonDocument.Parse(statusResponse))
+                    using (JsonDocument jsonDocument = JsonDocument.Parse(statusResponse))
                     {
-                        var root = doc.RootElement;
+                        var root = jsonDocument.RootElement;
                         if (root.TryGetProperty("code", out var codeElement))
                         {
                             var statusCode = codeElement.GetInt64();

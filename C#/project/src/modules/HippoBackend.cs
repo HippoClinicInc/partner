@@ -189,9 +189,9 @@ public static class HippoBackend
             }
 
             // Extract token and hospital ID from JSON response
-            using (JsonDocument doc = JsonDocument.Parse(responseText))
+            using (JsonDocument jsonDocument = JsonDocument.Parse(responseText))
             {
-                var root = doc.RootElement;
+                var root = jsonDocument.RootElement;
                 if (root.TryGetProperty("data", out var dataElement))
                 {
                     if (dataElement.TryGetProperty("jwtToken", out var tokenElement))
@@ -256,9 +256,9 @@ public static class HippoBackend
 
             // Extract patient ID from JSON response
             string patientId = string.Empty;
-            using (JsonDocument doc = JsonDocument.Parse(responseText))
+            using (JsonDocument jsonDocument = JsonDocument.Parse(responseText))
             {
-                var root = doc.RootElement;
+                var root = jsonDocument.RootElement;
                 if (root.TryGetProperty("data", out var dataElement))
                 {
                     if (dataElement.TryGetProperty("patientId", out var patientIdElement))
@@ -310,9 +310,9 @@ public static class HippoBackend
             string dataId = string.Empty;
             if (!string.IsNullOrEmpty(responseText))
             {
-                using (JsonDocument doc = JsonDocument.Parse(responseText))
+                using (JsonDocument jsonDocument = JsonDocument.Parse(responseText))
                 {
-                    var root = doc.RootElement;
+                    var root = jsonDocument.RootElement;
                     if (root.TryGetProperty("data", out var dataElement))
                     {
                         if (dataElement.TryGetProperty("keys", out var keysElement))
