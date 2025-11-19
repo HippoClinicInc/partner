@@ -183,77 +183,80 @@ public static class Common
             {
                 int bytesReceived = S3UploadLib.GetAsyncUploadStatusBytes(dataId, buffer, bufferSize);
 
-                if (bytesReceived > 0)
-                {
-                    string statusResponse = System.Text.Encoding.UTF8.GetString(buffer, 0, bytesReceived);
-                    Console.WriteLine($"Status response: {statusResponse}");
-                    Console.WriteLine();
-
-                    using (JsonDocument jsonDocument = JsonDocument.Parse(statusResponse))
-                    {
-                        var root = jsonDocument.RootElement;
-                        if (root.TryGetProperty("code", out var codeElement))
-                        {
-                            var statusCode = codeElement.GetInt64();
-
-                            if (statusCode == (long)UploadStatus.UPLOAD_SUCCESS)
-                            {
-                                if (root.TryGetProperty("status", out var statusElement))
-                                {
-                                    var uploadStatus = statusElement.GetInt64();
-
-                                    if (uploadStatus == (long)UploadStatus.CONFIRM_SUCCESS)
-                                    {
-                                        isCompleted = true;
-                                        break;
-                                    }
-                                    else if (uploadStatus == (long)UploadStatus.CONFIRM_FAILED)
-                                    {
-                                        Console.WriteLine("WARNING: Upload completed but confirmation failed");
-                                        isCompleted = true;
-                                        break;
-                                    }
-                                    else if (uploadStatus == (long)UploadStatus.UPLOAD_SUCCESS)
-                                    {
-                                        // Continue waiting
-                                    }
-                                    else if (uploadStatus == (long)UploadStatus.UPLOAD_FAILED)
-                                    {
-                                        isError = true;
-                                        var errorMessage = root.TryGetProperty("errorMessage", out var errElement)
-                                                               ? errElement.GetString()
-                                                               : "Unknown error";
-                                        Console.WriteLine($"ERROR: Upload failed - {errorMessage}");
-                                        break;
-                                    }
-                                }
-                            }
-                            else if (statusCode == (long)UploadStatus.UPLOAD_FAILED)
-                            {
-                                isError = true;
-                                var message = root.TryGetProperty("message", out var msgElement)
-                                                  ? msgElement.GetString()
-                                                  : "Unknown error";
-                                Console.WriteLine($"ERROR: Upload task not found - {message}");
-                                break;
-                            }
-                            else
-                            {
-                                isError = true;
-                                var message = root.TryGetProperty("message", out var msgElement)
-                                                  ? msgElement.GetString()
-                                                  : "Unknown error";
-                                Console.WriteLine($"ERROR: Failed to get upload status - {message}");
-                                break;
-                            }
-                        }
-                    }
-                }
-                else
+                if (bytesReceived <= 0)
                 {
                     Console.WriteLine("No data received from GetAsyncUploadStatusBytes");
                     isError = true;
                     break;
+                }
+
+                string statusResponse = System.Text.Encoding.UTF8.GetString(buffer, 0, bytesReceived);
+                Console.WriteLine($"Status response: {statusResponse}");
+                Console.WriteLine();
+
+                using (JsonDocument jsonDocument = JsonDocument.Parse(statusResponse))
+                {
+                    var root = jsonDocument.RootElement;
+                    if (!root.TryGetProperty("code", out var codeElement))
+                    {
+                        isError = true;
+                        Console.WriteLine("ERROR: Failed to get upload status - missing 'code' field");
+                        break;
+                    }
+
+                    var statusCode = codeElement.GetInt64();
+
+                    bool shouldExitLoop = false;
+                    switch ((UploadStatus)statusCode)
+                    {
+                        case UploadStatus.UPLOAD_SUCCESS:
+                            if (!root.TryGetProperty("status", out var statusElement))
+                            {
+                                Console.WriteLine("WARNING: Upload succeeded but response missing 'status' field");
+                                break;
+                            }
+
+                            var uploadStatus = (UploadStatus)statusElement.GetInt64();
+                            switch (uploadStatus)
+                            {
+                                case UploadStatus.CONFIRM_SUCCESS:
+                                    isCompleted = true;
+                                    shouldExitLoop = true;
+                                    break;
+                                case UploadStatus.CONFIRM_FAILED:
+                                    Console.WriteLine("WARNING: Upload completed but confirmation failed");
+                                    isCompleted = true;
+                                    shouldExitLoop = true;
+                                    break;
+                                case UploadStatus.UPLOAD_SUCCESS:
+                                    // Continue waiting
+                                    break;
+                                case UploadStatus.UPLOAD_FAILED:
+                                    isError = true;
+                                    Console.WriteLine($"ERROR: Upload failed - {GetJsonMessage(root, "errorMessage")}");
+                                    shouldExitLoop = true;
+                                    break;
+                                default:
+                                    Console.WriteLine($"WARNING: Unexpected upload status code: {uploadStatus}");
+                                    break;
+                            }
+                            break;
+                        case UploadStatus.UPLOAD_FAILED:
+                            isError = true;
+                            Console.WriteLine($"ERROR: Upload task not found - {GetJsonMessage(root)}");
+                            shouldExitLoop = true;
+                            break;
+                        default:
+                            isError = true;
+                            Console.WriteLine($"ERROR: Failed to get upload status - {GetJsonMessage(root)}");
+                            shouldExitLoop = true;
+                            break;
+                    }
+
+                    if (shouldExitLoop)
+                    {
+                        break;
+                    }
                 }
             }
             catch (JsonException ex)
@@ -300,6 +303,17 @@ public static class Common
     public static bool MonitorMultipleUploadStatus(string dataId, long maxWaitTime)
     {
         return MonitorUploadStatus(dataId, maxWaitTime);
+    }
+
+    private static string GetJsonMessage(JsonElement root, string propertyName = "message",
+                                         string defaultValue = "Unknown error")
+    {
+        if (root.TryGetProperty(propertyName, out var propertyElement))
+        {
+            return propertyElement.GetString() ?? defaultValue;
+        }
+
+        return defaultValue;
     }
 }
 }
