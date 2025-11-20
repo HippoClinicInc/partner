@@ -43,14 +43,14 @@ public enum FileOperationType
     /// </summary>
     public static class Common
     {
-        public const string HippoBaseUrl = "https://hippoclinic.com";
+        public const string HippoBaseUrl = "https://dev.hippoclinic.com";
 
         /// <summary>
         /// S3 configuration constants
         /// For prod running, do not change it here. In our current prod settings,
         /// the prod bucket is called "hippoclinic-staging". We will change it later.
         /// </summary>
-        public const string S3Bucket = "hippoclinic-staging";
+        public const string S3Bucket = "hippoclinic-dev";
         public const string S3Region = "us-west-1";
 
         /// <summary>
@@ -235,6 +235,9 @@ public enum FileOperationType
                                     break;
                                 case UploadStatus.UPLOAD_SUCCESS:
                                     // Continue waiting
+                                    break;
+                                case UploadStatus.UPLOAD_UPLOADING:
+                                    Console.WriteLine("INFO: Upload is in progress...");
                                     break;
                                 case UploadStatus.UPLOAD_FAILED:
                                     isError = true;
