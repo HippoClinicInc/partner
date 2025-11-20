@@ -49,16 +49,6 @@ const string DEFAULT_PATIENT_NAME = "Test api";
 4. Clone/copy the repo to `D:\code\partner` and ensure `C#/project/lib/` still contains all DLLs
 5. Open a fresh PowerShell and run `dotnet --info`, confirming an `SDK: 9.0.xxx (x64)` entry plus `RID: win-x86`
 
-### Build Steps (pick batch or real-time)
-
-```powershell
-cd D:/code/partner/C#/project
-# Batch upload
-dotnet build BatchUpload.csproj -c Release
-# Or real-time upload
-dotnet build RealTimeUpload.csproj -c Release
-```
-
 ## Running the Programs
 
 ### Run Batch Upload Program
