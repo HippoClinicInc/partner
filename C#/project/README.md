@@ -105,6 +105,7 @@ const string DEFAULT_PATIENT_NAME = "Test api";
 1. Install prerequisites  
    - Download **.NET SDK 9.0 (x64)** from Microsoft or run `winget install Microsoft.DotNet.SDK.9`.  
    - After installation, verify with `dotnet --list-sdks` and make sure a `9.0.xxx` entry appears.
+   - **Install Microsoft Visual C++ Redistributable (x86)**: Since the C++ DLL (`S3UploadLib.dll`) is compiled with `/MD` flag (dynamic runtime linking), you need to install the **x86 (32-bit) version** of Visual C++ Redistributable. Download from [Microsoft's official page](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist) or run `winget install Microsoft.VCRedist.2015+.x86`. This is required for the C++ DLL to run properly.
 2. Get the project  
    - Clone or copy this repo to the machine, e.g., `D:\code\partner`.
 3. Restore the native DLLs  
