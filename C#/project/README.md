@@ -4,7 +4,8 @@ This is the C# version of the HippoClinic S3 upload client.
 
 ## Prerequisites
 
-- .NET 9.0 SDK (project validated on net9; earlier versions require manual csproj edits)
+- .NET 9.0 SDK **(x64)** for building (project validated on net9; earlier versions require manual csproj edits)
+- .NET 9.0 Runtime **or SDK (x86)** for running the app (the app is x86 because it loads a 32-bit C++ DLL)
 - Windows OS (for DLL interop)
 - All required DLL files in the `lib/` directory
 
@@ -29,27 +30,31 @@ C#/project/
 
 > Compatibility: the solution works with `net6.0` and above, and has been fully validated with the `net9.0` SDK. If you use a different SDK version, edit the `TargetFramework` (or `TargetFrameworks`) element in both `BatchUpload.csproj` and `RealTimeUpload.csproj` so it matches your local installation.
 
-### Option 1: Build Batch Upload Program
+### Environment Prep (one-time before running)
 
-```bash
-cd C#/project
-dotnet build BatchUpload.csproj
-```
+1. Install `.NET 9.0 SDK (x64)`: `winget install Microsoft.DotNet.SDK.9`
+2. Install `.NET 9.0 Runtime (x86)` or `.NET 9.0 SDK (x86)`: `winget install Microsoft.DotNet.Runtime.9 --architecture x86`
+3. Install **Microsoft Visual C++ Redistributable x86**: `winget install Microsoft.VCRedist.2015+.x86`
+4. Clone/copy the repo to `D:\code\partner` and ensure `C#/project/lib/` still contains all DLLs
+5. Open a fresh PowerShell and run `dotnet --info`, confirming an `SDK: 9.0.xxx (x64)` entry plus `RID: win-x86`
 
-### Option 2: Build Real-Time Upload Program
+### Build Steps (pick batch or real-time)
 
-```bash
-cd C#/project
-dotnet build RealTimeUpload.csproj
+```powershell
+cd D:/code/partner/C#/project
+# Batch upload
+dotnet build BatchUpload.csproj -c Release
+# Or real-time upload
+dotnet build RealTimeUpload.csproj -c Release
 ```
 
 ## Running the Programs
 
 ### Run Batch Upload Program
 
-```bash
-# Build and run
-dotnet run --project BatchUpload.csproj
+```powershell
+cd D:/code/partner/C#/project
+dotnet run --project BatchUpload.csproj -c Release
 ```
 
 The program will:
@@ -62,9 +67,9 @@ The program will:
 
 ### Run Real-Time Upload Program
 
-```bash
-# Build and run
-dotnet run --project RealTimeUpload.csproj
+```powershell
+cd D:/code/partner/C#/project
+dotnet run --project RealTimeUpload.csproj -c Release
 ```
 
 The program will:
@@ -97,27 +102,10 @@ const string DEFAULT_PATIENT_NAME = "Test api";
 ## Troubleshooting
 
 1. **DLL not found**: Ensure all DLL files are in the `lib/` directory
-2. **Build errors**: Make sure you have .NET 8.0 SDK installed
-3. **Runtime errors**: Check that the DLL files match the architecture (x86)
+2. **Build errors**: Make sure you have .NET 9.0 SDK (x64) installed (or update the `TargetFramework` to match an installed SDK)
+3. **Runtime errors**: Check that:
+   - The DLL files match the architecture (x86)
+   - .NET 9.0 Runtime or SDK (x86) is installed (the error message will usually say “Architecture: x86” if this is missing)
+   - You can directly download the missing x86 runtime using the official link from the error message:  
+     `https://aka.ms/dotnet-core-applaunch?missing_runtime=true&arch=x86&rid=win-x86&os=win10&apphost_version=9.0.11`
 
-## Set Up on a Fresh Windows PC (with .NET 9)
-
-1. Install prerequisites  
-   - Download **.NET SDK 9.0 (x64)** from Microsoft or run `winget install Microsoft.DotNet.SDK.9`.  
-   - After installation, verify with `dotnet --list-sdks` and make sure a `9.0.xxx` entry appears.
-   - **Install Microsoft Visual C++ Redistributable (x86)**: Since the C++ DLL (`S3UploadLib.dll`) is compiled with `/MD` flag (dynamic runtime linking), you need to install the **x86 (32-bit) version** of Visual C++ Redistributable. Download from [Microsoft's official page](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist) or run `winget install Microsoft.VCRedist.2015+.x86`. This is required for the C++ DLL to run properly.
-2. Get the project  
-   - Clone or copy this repo to the machine, e.g., `D:\code\partner`.
-3. Restore the native DLLs  
-   - The repo already ships with `C#/project/lib/` containing the 32-bit `S3UploadLib.dll` and dependencies, so normally no action is required unless you removed or replaced them.
-4. Build  
-   ```powershell
-   cd D:\code\partner\C#\project
-   dotnet build RealTimeUpload.csproj -c Release
-   ```
-   - To build the batch variant, switch to `BatchUpload.csproj`.
-5. Run  
-   ```powershell
-   dotnet run --project RealTimeUpload.csproj -c Release
-   ```
-   - Follow the prompts to enter account and patient data, then confirm uploads succeed.
