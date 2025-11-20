@@ -26,6 +26,17 @@ C#/project/
 └── RealTimeUpload.csproj                # Project file for real-time upload
 ```
 
+## Configuration
+
+Edit the constants in `BatchMain.cs` or `RealTimeFileAppendMain.cs`:
+
+```csharp
+const string HIPPO_ACCOUNT = "2546566177@qq.com";
+const string HIPPO_PASSWORD = "u3LJ2lXv";
+const string DEFAULT_MRN = "123";
+const string DEFAULT_PATIENT_NAME = "Test api";
+```
+
 ## Building the Project
 
 > Compatibility: the solution works with `net6.0` and above, and has been fully validated with the `net9.0` SDK. If you use a different SDK version, edit the `TargetFramework` (or `TargetFrameworks`) element in both `BatchUpload.csproj` and `RealTimeUpload.csproj` so it matches your local installation.
@@ -79,17 +90,6 @@ The program will:
 3. Ask to choose between new or append mode
 4. Upload file using REAL_TIME_APPEND mode
 5. Monitor upload status until completion
-
-## Configuration
-
-Edit the constants in `BatchMain.cs` or `RealTimeFileAppendMain.cs`:
-
-```csharp
-const string HIPPO_ACCOUNT = "2546566177@qq.com";
-const string HIPPO_PASSWORD = "u3LJ2lXv";
-const string DEFAULT_MRN = "123";
-const string DEFAULT_PATIENT_NAME = "Test api";
-```
 
 ## Notes
 
