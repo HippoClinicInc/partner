@@ -57,7 +57,7 @@ public class RealTimeFileAppendMain
         // 0. Initialize HippoBackend with configuration
         HippoBackend.Initialize(Common.HippoBaseUrl, HIPPO_ACCOUNT, HIPPO_PASSWORD);
 
-        // 0. Set DLL search path and validate DLL files
+        // 1. Set DLL search path and validate DLL files
         if (!DllPathManager.SetDllSearchPath())
         {
             Console.WriteLine("ERROR: Failed to set DLL search path");
@@ -66,7 +66,7 @@ public class RealTimeFileAppendMain
             return;
         }
 
-        // 1. Get file path from user input and validate existence
+        // 2. Get file path from user input and validate existence
         Console.Write("Please enter the file path to upload (real-time): ");
         uploadFilePath = (Console.ReadLine() ?? string.Empty).Trim();
         if (string.IsNullOrEmpty(uploadFilePath))
@@ -82,14 +82,14 @@ public class RealTimeFileAppendMain
             uploadFilePath = uploadFilePath.Substring(1, uploadFilePath.Length - 2);
         }
 
-        // 1.1. Validate file/folder exists
+        // 2.1. Validate file/folder exists
         if (!FileLib.FileOrFolderExists(uploadFilePath))
         {
             Console.WriteLine($"ERROR: Path does not exist: {uploadFilePath}");
             return;
         }
 
-        // 2. Check if the path is a folder (not supported for real-time append)
+        // 3. Check if the path is a folder (not supported for real-time append)
         if (FileLib.IsPathFolder(uploadFilePath))
         {
             Console.WriteLine("ERROR: Folder upload is not supported for RealTimeAppend mode");
@@ -98,7 +98,7 @@ public class RealTimeFileAppendMain
             return;
         }
 
-        // 3. Create patient record (token managed internally)
+        // 4. Create patient record (token managed internally)
         var (patientCreated, createdPatientId) =
             await HippoBackend.CreatePatientAsync(DEFAULT_MRN, DEFAULT_PATIENT_NAME).ConfigureAwait(false);
         if (!patientCreated)
@@ -108,7 +108,7 @@ public class RealTimeFileAppendMain
         }
         patientId = createdPatientId;
 
-        // 4. Ask user to choose between new or append mode
+        // 5. Ask user to choose between new or append mode
         Console.WriteLine("Please choose upload mode:");
         Console.WriteLine("1 - New (create new dataId)");
         Console.WriteLine("2 - Append (use existing dataId)");
@@ -123,7 +123,7 @@ public class RealTimeFileAppendMain
 
         if (userChoice == "2")
         {
-            // 4.1. Append mode: ask user to input existing dataId
+            // 5.1. Append mode: ask user to input existing dataId
             Console.Write("Please enter the existing dataId to append: ");
             dataId = (Console.ReadLine() ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(dataId))
@@ -135,7 +135,7 @@ public class RealTimeFileAppendMain
         }
         else
         {
-            // 4.2. New mode: generate new dataId (default behavior)
+            // 5.2. New mode: generate new dataId (default behavior)
             var (dataIdGenerated, generatedDataId) =
                 await HippoBackend.GenerateDataIdAsync().ConfigureAwait(false);
             if (!dataIdGenerated)
@@ -146,7 +146,7 @@ public class RealTimeFileAppendMain
             dataId = generatedDataId;
         }
 
-        // 5. Set credentials and initialize AWS SDK
+        // 6. Set credentials and initialize AWS SDK
         IntPtr sdkInitResultPtr = S3UploadLib.SetCredential(Common.HippoBaseUrl, HIPPO_ACCOUNT, HIPPO_PASSWORD);
         sdkInitResult = S3UploadLib.PtrToString(sdkInitResultPtr);
 
@@ -163,7 +163,7 @@ public class RealTimeFileAppendMain
             }
         }
 
-        // 6. Upload single file
+        // 7. Upload single file
         // Upload data name: abc.ds
         uploadDataName = FileLib.GetFileName(uploadFilePath);
         // S3 file key: patient/patientId/source_data/dataId/abc.ds/abc.ds
@@ -172,7 +172,7 @@ public class RealTimeFileAppendMain
         uploadSuccess = Common.UploadSingleFile(uploadFilePath, s3FileKey, dataId, patientId,
                                                 FileOperationType.REAL_TIME_APPEND, out singleUploadId);
 
-        // 7. Monitor single file upload status
+        // 8. Monitor single file upload status
         if (uploadSuccess)
         {
             totalFileSize = FileLib.GetLocalFileSize(uploadFilePath);
@@ -180,7 +180,7 @@ public class RealTimeFileAppendMain
             uploadSuccess = Common.MonitorUploadStatus(dataId, UPLOAD_MAX_WAIT_TIME_SECONDS);
         }
 
-        // 8. Upload process completed (confirmation and cleanup are handled automatically by C++ backend)
+        // 9. Upload process completed (confirmation and cleanup are handled automatically by C++ backend)
         if (uploadSuccess)
         {
             Console.WriteLine("SUCCESS: Real-time upload completed and confirmed");

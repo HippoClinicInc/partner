@@ -38,20 +38,25 @@ public enum FileOperationType
     REAL_TIME_APPEND = 1
 }
 
-/// <summary>
-/// HippoClinic configuration constants
-/// </summary>
-public static class Common
-{
-    public const string HippoBaseUrl = "https://hippoclinic.com";
-
     /// <summary>
-    /// S3 configuration constants
-    /// For prod running, do not change it here. In our current prod settings,
-    /// the prod bucket is called "hippoclinic-staging". We will change it later.
+    /// HippoClinic configuration constants
     /// </summary>
-    public const string S3Bucket = "hippoclinic-staging";
-    public const string S3Region = "us-west-1";
+    public static class Common
+    {
+        public const string HippoBaseUrl = "https://hippoclinic.com";
+
+        /// <summary>
+        /// S3 configuration constants
+        /// For prod running, do not change it here. In our current prod settings,
+        /// the prod bucket is called "hippoclinic-staging". We will change it later.
+        /// </summary>
+        public const string S3Bucket = "hippoclinic-staging";
+        public const string S3Region = "us-west-1";
+
+        /// <summary>
+        /// Polling interval in milliseconds for upload status monitoring
+        /// </summary>
+        private const int UploadStatusPollingIntervalMilliseconds = 10000; // 10 seconds
 
     /// <summary>
     /// Upload all files in a folder to S3 and confirm with API (BatchCreate mode only)
@@ -272,11 +277,8 @@ public static class Common
                 break;
             }
 
-            // Sleep for 10 seconds (10 iterations of 1 second)
-            for (int i = 0; i < 10; i++)
-            {
-                Thread.Sleep(1000);
-            }
+            // Sleep for polling interval before next status check
+            Thread.Sleep(UploadStatusPollingIntervalMilliseconds);
             waitTime++;
         }
 
