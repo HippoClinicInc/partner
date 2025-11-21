@@ -1,5 +1,7 @@
 #include "../common/S3Common.h"
 #include "../common/request/s3_client_manager.h"
+#include <sstream>
+#include <iomanip>
 
 // Global worker thread management
 // Architecture: Single persistent worker thread + thread-safe task queue in AsyncUploadManager
@@ -10,6 +12,33 @@ static std::thread g_workerThread;                 // The single persistent work
 static std::mutex g_workerThreadMutex;             // Protects worker thread creation/restart operations
 static std::chrono::steady_clock::time_point g_lastTaskProcessedTime;  // Timestamp of last task completion
 static std::mutex g_lastTaskTimeMutex;             // Protects access to g_lastTaskProcessedTime
+
+// Ensure JSON strings are standards-compliant so that strict parsers (e.g. System.Text.Json)
+// receive valid data consistently across C#, VB, and other clients.
+static std::string JsonEscape(const std::string& rawString) {
+    std::ostringstream escapedStream;
+    for (unsigned char currentChar : rawString) {
+        switch (currentChar) {
+            case '\"': escapedStream << "\\\""; break;
+            case '\\': escapedStream << "\\\\"; break;
+            case '\b': escapedStream << "\\b"; break;
+            case '\f': escapedStream << "\\f"; break;
+            case '\n': escapedStream << "\\n"; break;
+            case '\r': escapedStream << "\\r"; break;
+            case '\t': escapedStream << "\\t"; break;
+            default:
+                if (currentChar < 0x20) {
+                    escapedStream << "\\u"
+                                  << std::uppercase << std::hex << std::setw(4) << std::setfill('0')
+                                  << static_cast<int>(currentChar);
+                    escapedStream << std::dec << std::nouppercase;
+                } else {
+                    escapedStream << static_cast<char>(currentChar);
+                }
+        }
+    }
+    return escapedStream.str();
+}
 
 // Upload processing function
 // This function handles the actual file upload to S3, called by the worker thread
@@ -661,8 +690,8 @@ extern "C" S3UPLOAD_API int __stdcall GetAsyncUploadStatusBytes(
             << "\"uploadedSize\":" << uploadedSize << ","
             << "\"totalSize\":" << totalSize << ","
             << "\"totalUploadCount\":" << totalUploadCount << ","
-            << "\"errorMessage\":\"" << errorMessage << "\","
-            << "\"dataId\":\"" << dataId << "\","
+            << "\"errorMessage\":\"" << JsonEscape(errorMessage) << "\","
+            << "\"dataId\":\"" << JsonEscape(dataId) << "\","
             << "\"uploads\":[";
 
         // Add array of individual upload information
@@ -681,12 +710,12 @@ extern "C" S3UPLOAD_API int __stdcall GetAsyncUploadStatusBytes(
             }
             
             oss << "{"
-                << "\"uploadId\":\"" << progress->uploadId << "\","
-                << "\"localFilePath\":\"" << progress->localFilePath << "\","
-                << "\"s3ObjectKey\":\"" << progress->s3ObjectKey << "\","
+                << "\"uploadId\":\"" << JsonEscape(progress->uploadId) << "\","
+                << "\"localFilePath\":\"" << JsonEscape(progress->localFilePath) << "\","
+                << "\"s3ObjectKey\":\"" << JsonEscape(progress->s3ObjectKey) << "\","
                 << "\"status\":" << progress->status << ","
                 << "\"totalSize\":" << progress->totalSize << ","
-                << "\"errorMessage\":\"" << progress->errorMessage << "\","
+                << "\"errorMessage\":\"" << JsonEscape(progress->errorMessage) << "\","
                 << "\"startTime\":" << startTimeMs << ","
                 << "\"endTime\":" << endTimeMs
                 << "}";
