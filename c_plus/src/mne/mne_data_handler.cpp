@@ -1,20 +1,33 @@
 #include "mne_data_handler.h"
-#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <random>
 #include <sstream>
+#include <unordered_map>
 #include "hippo-cpp/hippo/common/common.pb.h"
 #include "hippo-cpp/hippo/common/data_type.pb.h"
+
+// Include our own time_signal_data_utils for C++ usage
+#include "time_signal_data_utils.h"
 #if defined(_WIN32)
 #define timegm _mkgmtime
 #else
 #include <sys/time.h>
 #endif
+
+// Include protobuf headers - adjust paths as needed
+// Assuming protobuf files are generated and available
+// #include "hippo/common/s3_file.pb.h"
+// #include "hippo/web/device_data.pb.h"
+// #include "hippo/common/data_type.pb.h"
+// #include "hippo/common/common.pb.h"
+
+// For now, we'll use a simplified approach without full protobuf
+// In a real implementation, you would include the actual protobuf headers
 
 namespace fs = std::filesystem;
 
@@ -143,7 +156,7 @@ std::pair<int, int> MneDataHandler::GetDownSampleFrequency(int raw_data_frequenc
     return std::make_pair(down_sample_frequency, down_sample_rate);
 }
 
-MneDataHandler::PartitionIndices MneDataHandler::CalculateGroupPartitionIndices(int64_t n_times, int channel_count,
+MneDataHandler::PartitionIndices MneDataHandler::CalculateGroupPartitionIndices(int64_t total_sample_count, int channel_count,
                                                                                 int raw_data_frequency,
                                                                                 int down_sample_rate)
 {
@@ -170,16 +183,16 @@ MneDataHandler::PartitionIndices MneDataHandler::CalculateGroupPartitionIndices(
 
     // Get group partition indices
     std::vector<std::vector<int64_t>> part_group_partition_indices;
-    if (n_times / partition_data_num <= 1)
+    if (total_sample_count / partition_data_num <= 1)
     {
-        part_group_partition_indices.push_back({0, n_times});
+        part_group_partition_indices.push_back({0, total_sample_count});
     }
     else
     {
-        int partition_num = static_cast<int>(n_times / partition_data_num);
-        for (int i = 0; i < partition_num; i++)
+        int partition_num = static_cast<int>(total_sample_count / partition_data_num);
+        for (int partition_index = 0; partition_index < partition_num; partition_index++)
         {
-            int64_t start = i * partition_data_num;
+            int64_t start = partition_index * partition_data_num;
             part_group_partition_indices.push_back({start, start + partition_data_num});
         }
     }
@@ -190,10 +203,10 @@ MneDataHandler::PartitionIndices MneDataHandler::CalculateGroupPartitionIndices(
 
     int partition_data_padding_length = raw_data_frequency * kPaddingTimeSeconds;
 
-    for (int i = 0; i < partition_length; i++)
+    for (int partition_index = 0; partition_index < partition_length; partition_index++)
     {
-        int64_t partition_data_start_index = part_group_partition_indices[i][0];
-        int64_t partition_data_end_index = part_group_partition_indices[i][1];
+        int64_t partition_data_start_index = part_group_partition_indices[partition_index][0];
+        int64_t partition_data_end_index = part_group_partition_indices[partition_index][1];
 
         int64_t left_padding_start_index;
         int64_t right_padding_end_index;
@@ -203,29 +216,29 @@ MneDataHandler::PartitionIndices MneDataHandler::CalculateGroupPartitionIndices(
             left_padding_start_index = -1 * down_sample_rate;
             right_padding_end_index = -1 * down_sample_rate;
         }
-        else if (i == 0)
+        else if (partition_index == 0)
         {
             // First partition
             left_padding_start_index = -1 * down_sample_rate;
-            right_padding_end_index = part_group_partition_indices[i + 1][0] + partition_data_padding_length;
+            right_padding_end_index = part_group_partition_indices[partition_index + 1][0] + partition_data_padding_length;
         }
-        else if (i == partition_length - 1)
+        else if (partition_index == partition_length - 1)
         {
             // Final partition
-            left_padding_start_index = part_group_partition_indices[i - 1][1] - partition_data_padding_length;
+            left_padding_start_index = part_group_partition_indices[partition_index - 1][1] - partition_data_padding_length;
             right_padding_end_index = -1 * down_sample_rate;
-            partition_data_end_index = n_times;
+            partition_data_end_index = total_sample_count;
         }
         else
         {
-            left_padding_start_index = part_group_partition_indices[i - 1][1] - partition_data_padding_length;
-            right_padding_end_index = part_group_partition_indices[i + 1][0] + partition_data_padding_length;
+            left_padding_start_index = part_group_partition_indices[partition_index - 1][1] - partition_data_padding_length;
+            right_padding_end_index = part_group_partition_indices[partition_index + 1][0] + partition_data_padding_length;
         }
 
-        result.group_partition_indices[i] = {left_padding_start_index, partition_data_start_index,
+        result.group_partition_indices[partition_index] = {left_padding_start_index, partition_data_start_index,
                                              partition_data_end_index, right_padding_end_index};
 
-        result.down_sampled_group_partition_indices[i] = {
+        result.down_sampled_group_partition_indices[partition_index] = {
             static_cast<int64_t>(left_padding_start_index / down_sample_rate),
             static_cast<int64_t>(partition_data_start_index / down_sample_rate),
             static_cast<int64_t>(partition_data_end_index / down_sample_rate),
@@ -267,25 +280,67 @@ std::vector<DeviceData> MneDataHandler::GeneratePartitionsFromArray2(
     fs::create_directories(down_sampled_output_dir);
 
     // Generate raw data partitions
-    for (size_t i = 0; i < group_partition_indices.size(); i++)
+    for (size_t partition_index = 0; partition_index < group_partition_indices.size(); partition_index++)
     {
-        const auto& partition_indices = group_partition_indices[i];
+        const auto& partition_indices = group_partition_indices[partition_index];
         int64_t partition_start = partition_indices[1];
         int64_t partition_end = partition_indices[2];
 
         auto device_data = InitializeDeviceData();
 
         // Generate partition file name
-        std::string partition_file_name = raw_file_id_ + "_RawPartition_" + std::to_string(i) + ".pb";
+        std::string partition_file_name = raw_file_id_ + "_RawPartition_" + std::to_string(partition_index) + ".pb";
         fs::path partition_file_path = raw_output_dir / partition_file_name;
 
-        // In real implementation, you would:
-        // 1. Extract partition data from raw_data (from partition_start to partition_end)
-        // 2. Generate MeegData protobuf for this partition
-        // 3. Serialize and save to local file
-        // For now, create a placeholder protobuf file
-        std::string partition_data = "RawPartition_" + std::to_string(i) + " start:" + std::to_string(partition_start) +
-            " end:" + std::to_string(partition_end);
+        // Convert raw_data.buf to 2D array format [channel][samples]
+        std::vector<std::vector<float>> raw_data_2d_array(channel_names.size());
+        int64_t total_samples = raw_data.buf.size() / channel_names.size();
+        
+        for (size_t channel_index = 0; channel_index < channel_names.size(); channel_index++)
+        {
+            raw_data_2d_array[channel_index].reserve(total_samples);
+            for (int64_t sample_index = 0; sample_index < total_samples; sample_index++)
+            {
+                int64_t data_index = sample_index * channel_names.size() + channel_index;
+                if (data_index < raw_data.buf.size())
+                {
+                    raw_data_2d_array[channel_index].push_back(raw_data.buf[data_index]);
+                }
+            }
+        }
+        
+        // Create data_unit_type_map (all channels are VOLT)
+        std::unordered_map<std::string, int> data_unit_type_map;
+        for (const auto& channel_name : channel_names)
+        {
+            data_unit_type_map[channel_name] = static_cast<int>(hippo::common::s3_file::SignalDataUnit::VOLT);
+        }
+        
+        // Call the utility function to generate partition data
+        MeegData partition_meeg_data = generateSinglePartitionPaddingLoselessData<float>(
+            raw_data_2d_array,
+            static_cast<int>(partition_indices[0]),  // left_padding_start
+            static_cast<int>(partition_start),       // partition_data_start
+            static_cast<int>(partition_end),         // partition_data_end
+            static_cast<int>(partition_indices[3]),  // right_padding_end
+            channel_names,
+            raw_start_time_microseconds,
+            shared_meeg_data,
+            hippo::common::s3_file::DataStorageType::DATA_STORAGE_FLOAT32,
+            data_unit_type_map);
+        
+        // Set partition file name
+        partition_meeg_data.set_currentfilename(partition_file_name);
+        
+        // Serialize MeegData protobuf
+        std::string partition_data;
+        if (!partition_meeg_data.SerializeToString(&partition_data))
+        {
+            std::cerr << "Failed to serialize partition " << partition_index << std::endl;
+            continue;
+        }
+        
+        // Save to local file
         SaveProtobufToLocal(partition_file_path.string(), partition_data);
 
         // Set device_data fields
@@ -298,29 +353,94 @@ std::vector<DeviceData> MneDataHandler::GeneratePartitionsFromArray2(
 
         device_data_list.push_back(device_data);
 
-        std::cout << "  Raw Partition " << i << ": [" << partition_start << ", " << partition_end << "]" << std::endl;
+        std::cout << "  Raw Partition " << partition_index << ": [" << partition_start << ", " << partition_end << "]" << std::endl;
     }
 
     // Generate down-sampled data partitions
-    for (size_t i = 0; i < down_sampled_group_partition_indices.size(); i++)
+    for (size_t partition_index = 0; partition_index < down_sampled_group_partition_indices.size(); partition_index++)
     {
-        const auto& partition_indices = down_sampled_group_partition_indices[i];
+        const auto& partition_indices = down_sampled_group_partition_indices[partition_index];
         int64_t partition_start = partition_indices[1];
         int64_t partition_end = partition_indices[2];
 
         auto device_data = InitializeDeviceData();
 
         // Generate partition file name
-        std::string partition_file_name = raw_file_id_ + "_DownSampledPartition_" + std::to_string(i) + ".pb";
+        std::string partition_file_name = raw_file_id_ + "_DownSampledPartition_" + std::to_string(partition_index) + ".pb";
         fs::path partition_file_path = down_sampled_output_dir / partition_file_name;
 
-        // In real implementation, you would:
-        // 1. Extract and down-sample partition data from raw_data
-        // 2. Generate MeegData protobuf for this down-sampled partition
-        // 3. Serialize and save to local file
-        // For now, create a placeholder protobuf file
-        std::string partition_data = "DownSampledPartition_" + std::to_string(i) +
-            " start:" + std::to_string(partition_start) + " end:" + std::to_string(partition_end);
+        // Prepare down-sampled data (Simple decimation for now)
+        // Python uses mne.filter.resample, but we implement simple decimation as placeholder/approximation
+        // To match Python exactly, we would need to implement FFT-based resampling
+        
+        std::vector<std::vector<float>> down_sampled_data_2d_array(channel_names.size());
+        int64_t down_sampled_count = partition_end - partition_start;
+        
+        for (size_t channel_index = 0; channel_index < channel_names.size(); channel_index++)
+        {
+            down_sampled_data_2d_array[channel_index].reserve(down_sampled_count);
+            
+            // Calculate original indices and extract
+            int64_t original_start = partition_start * down_sample_rate;
+            
+            for (int64_t ds_index = 0; ds_index < down_sampled_count; ds_index++)
+            {
+                int64_t original_index = original_start + ds_index * down_sample_rate;
+                int64_t data_index = original_index * channel_names.size() + channel_index;
+                
+                if (data_index < raw_data.buf.size())
+                {
+                    down_sampled_data_2d_array[channel_index].push_back(raw_data.buf[data_index]);
+                }
+                else 
+                {
+                    down_sampled_data_2d_array[channel_index].push_back(0.0f); // Padding if out of bounds
+                }
+            }
+        }
+        
+        // Create data_unit_type_map (all channels are VOLT)
+        std::unordered_map<std::string, int> data_unit_type_map;
+        for (const auto& channel_name : channel_names)
+        {
+            data_unit_type_map[channel_name] = static_cast<int>(hippo::common::s3_file::SignalDataUnit::VOLT);
+        }
+        
+        // Call the utility function to generate min-max projection partition data
+        // This matches Python's generate_down_sample_partition_padding_data logic
+        MeegData partition_meeg_data = generateSinglePartitionMinMaxProjection(
+            down_sampled_data_2d_array,
+            static_cast<int>(partition_indices[0]),  // left_padding_start
+            0,                                       // partition_data_start (relative to down_sampled_data_2d_array)
+            static_cast<int>(down_sampled_count),    // partition_data_end (relative to down_sampled_data_2d_array)
+            static_cast<int>(partition_indices[3]),  // right_padding_end
+            channel_names,
+            raw_start_time_microseconds,
+            shared_meeg_data,
+            data_unit_type_map);
+            
+        // Update sample frequency and filename
+        partition_meeg_data.set_samplefrequency(down_sampled_frequency);
+        partition_meeg_data.set_currentfilename(partition_file_name);
+        
+        // Set correct time range for this partition (re-calculated based on down-sampled indices)
+        int64_t partition_start_time_microseconds = raw_start_time_microseconds + 
+            static_cast<int64_t>((static_cast<double>(partition_start) / down_sampled_frequency) * kSecondsToMicroseconds);
+        int64_t partition_end_time_microseconds = raw_start_time_microseconds + 
+            static_cast<int64_t>((static_cast<double>(partition_end - 1) / down_sampled_frequency) * kSecondsToMicroseconds);
+        
+        partition_meeg_data.set_currentstarttimemicroseconds(partition_start_time_microseconds);
+        partition_meeg_data.set_currentendtimemicroseconds(partition_end_time_microseconds);
+        
+        // Serialize the MeegData protobuf
+        std::string partition_data;
+        if (!partition_meeg_data.SerializeToString(&partition_data))
+        {
+            std::cerr << "Failed to serialize down-sampled partition " << partition_index << std::endl;
+            continue;
+        }
+        
+        // Save to local file
         SaveProtobufToLocal(partition_file_path.string(), partition_data);
 
         // Set device_data fields
@@ -333,7 +453,7 @@ std::vector<DeviceData> MneDataHandler::GeneratePartitionsFromArray2(
 
         device_data_list.push_back(device_data);
 
-        std::cout << "  Down-sampled Partition " << i << ": [" << partition_start << ", " << partition_end << "]"
+        std::cout << "  Down-sampled Partition " << partition_index << ": [" << partition_start << ", " << partition_end << "]"
                   << std::endl;
     }
 
@@ -413,7 +533,7 @@ std::string MneDataHandler::CreateLocalDirectory(const std::string& patient_id, 
     std::uniform_int_distribution<int> distribution(0, 15);
 
     std::stringstream suffix_stream;
-    for (int i = 0; i < 32; i++)
+    for (int hex_char_index = 0; hex_char_index < 32; hex_char_index++)
     {
         suffix_stream << std::hex << distribution(generator);
     }
@@ -435,11 +555,11 @@ void MneDataHandler::DeleteMeegUploadFolder(int raw_data_frequency, int down_sam
     {
         if (fs::exists(dir))
         {
-            std::error_code ec;
-            fs::remove_all(dir, ec);
-            if (ec)
+            std::error_code error_code;
+            fs::remove_all(dir, error_code);
+            if (error_code)
             {
-                std::cerr << "Warning: failed to remove directory " << dir.string() << ": " << ec.message()
+                std::cerr << "Warning: failed to remove directory " << dir.string() << ": " << error_code.message()
                           << std::endl;
             }
         }
@@ -501,16 +621,16 @@ std::vector<DeviceData> MneDataHandler::Process()
     // 9. Print device_data_list summary
     std::cout << "\n=== Device Data List Summary ===" << std::endl;
     std::cout << "Total device data items: " << device_data_list.size() << std::endl;
-    for (size_t i = 0; i < device_data_list.size(); i++)
+    for (size_t device_data_index = 0; device_data_index < device_data_list.size(); device_data_index++)
     {
-        const auto& dd = device_data_list[i];
-        std::cout << "  DeviceData[" << i << "]:" << std::endl;
-        std::cout << "    data_id: " << dd.dataid() << std::endl;
-        std::cout << "    data_name: " << dd.dataname() << std::endl;
-        std::cout << "    file_name: " << dd.filename() << std::endl;
-        std::cout << "    data_size: " << dd.datasize() << " bytes" << std::endl;
-        std::cout << "    frequency: " << dd.frequency() << " Hz" << std::endl;
-        std::cout << "    data_type: " << dd.datatype() << std::endl;
+        const auto& device_data = device_data_list[device_data_index];
+        std::cout << "  DeviceData[" << device_data_index << "]:" << std::endl;
+        std::cout << "    data_id: " << device_data.dataid() << std::endl;
+        std::cout << "    data_name: " << device_data.dataname() << std::endl;
+        std::cout << "    file_name: " << device_data.filename() << std::endl;
+        std::cout << "    data_size: " << device_data.datasize() << " bytes" << std::endl;
+        std::cout << "    frequency: " << device_data.frequency() << " Hz" << std::endl;
+        std::cout << "    data_type: " << device_data.datatype() << std::endl;
     }
 
     return device_data_list;
