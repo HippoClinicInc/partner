@@ -5,6 +5,7 @@
 
 using namespace std;
 using namespace hippo::common::s3_file;
+using namespace hippo::common;
 
 // Helper function to create min-max projection segments
 vector<uint8_t> createMinMaxProjectionSegments(
@@ -30,14 +31,14 @@ vector<uint8_t> createMinMaxProjectionSegments(
         float maxVal = channelData[startIdx];
 
         for (size_t i = startIdx + 1; i < endIdx; ++i) {
-            minVal = min(minVal, channelData[i]);
-            maxVal = max(maxVal, channelData[i]);
+            minVal = std::min(minVal, channelData[i]);
+            maxVal = std::max(maxVal, channelData[i]);
         }
 
         // Project to [0, 255] range
         // Assuming the data is already normalized or we use a simple mapping
-        uint8_t minByte = static_cast<uint8_t>(max(0.0f, min(255.0f, (minVal + 1.0f) * 127.5f)));
-        uint8_t maxByte = static_cast<uint8_t>(max(0.0f, min(255.0f, (maxVal + 1.0f) * 127.5f)));
+        uint8_t minByte = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, (minVal + 1.0f) * 127.5f)));
+        uint8_t maxByte = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, (maxVal + 1.0f) * 127.5f)));
 
         projectedData.push_back(minByte);
         projectedData.push_back(maxByte);
@@ -50,7 +51,7 @@ vector<uint8_t> createMinMaxProjectionSegments(
 void fillMinMaxProjectionChannelData(
     const optional<vector<vector<float>>>& dataArrayOpt,
     const vector<string>& channelNames,
-    google::protobuf::Map<string, SignalSegmentProjectionData>& targetMap,
+    google::protobuf::Map<string, s3_file::MinMaxProjectedDataArray>& targetMap,
     const unordered_map<string, int>& dataUnitTypeMap) {
     
     if (!dataArrayOpt.has_value()) return;
@@ -59,27 +60,35 @@ void fillMinMaxProjectionChannelData(
     for (size_t channelId = 0; channelId < channelNames.size(); ++channelId) {
         const string& channelName = channelNames[channelId];
         const auto& srcVec = dataArray[channelId];
-        auto& projectionData = targetMap[channelName];
+        auto& channelData = targetMap[channelName];
 
         // Set data unit
         auto it = dataUnitTypeMap.find(channelName);
         if (it != dataUnitTypeMap.end()) {
-            projectionData.set_dataunit(static_cast<SignalDataUnit>(it->second));
+            channelData.set_dataunit(static_cast<s3_file::SignalDataUnit>(it->second));
         } else {
-            projectionData.set_dataunit(SignalDataUnit::VOLT);
+            channelData.set_dataunit(s3_file::SignalDataUnit::VOLT);
         }
 
-        // Create min-max projection
+        // Set projection metadata
+        channelData.set_maxprojectedvalue(kUint8MaxValue);
+        channelData.set_signaldatatype(s3_file::DATA_STORAGE_FLOAT32);
+
+        // Create min-max projection segments
         auto projectedBytes = createMinMaxProjectionSegments(srcVec);
         
-        // Set projection metadata
-        projectionData.set_maxprojectionvalue(kUint8MaxValue);
-        projectionData.set_datanumberinsinglesegment(kDataNumberInSingleSegment);
-        projectionData.set_totaldatanumber(srcVec.size());
-
-        // Set the byte data
+        // Add segment with the projected data
         if (!projectedBytes.empty()) {
-            projectionData.set_databyte(projectedBytes.data(), projectedBytes.size());
+            auto* segment = channelData.add_segments();
+            segment->set_databytes(projectedBytes.data(), projectedBytes.size());
+            
+            // Set min/max float values for the segment
+            if (!srcVec.empty()) {
+                float minVal = *std::min_element(srcVec.begin(), srcVec.end());
+                float maxVal = *std::max_element(srcVec.begin(), srcVec.end());
+                segment->set_minfloatvalue(minVal);
+                segment->set_maxfloatvalue(maxVal);
+            }
         }
     }
 }
@@ -122,7 +131,7 @@ MeegData generateSinglePartitionMinMaxProjection(
             rawDataSlice, channelNames,
             *partitionData.mutable_meegchanneldata()
                  ->mutable_minmaxprojecteddataarraychanneldata()
-                 ->mutable_signaldata(),
+                 ->mutable_projectedsignaldata(),
             dataUnitTypeMap);
     }
 
@@ -134,7 +143,7 @@ MeegData generateSinglePartitionMinMaxProjection(
                 leftPaddingSlice, channelNames,
                 *partitionData.mutable_meegchanneldata()
                      ->mutable_minmaxprojecteddataarraychanneldata()
-                     ->mutable_leftpadding(),
+                     ->mutable_projectedleftpadding(),
                 dataUnitTypeMap);
         }
     }
@@ -147,7 +156,7 @@ MeegData generateSinglePartitionMinMaxProjection(
                 rightPaddingSlice, channelNames,
                 *partitionData.mutable_meegchanneldata()
                      ->mutable_minmaxprojecteddataarraychanneldata()
-                     ->mutable_rightpadding(),
+                     ->mutable_projectedrightpadding(),
                 dataUnitTypeMap);
         }
     }
